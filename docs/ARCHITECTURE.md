@@ -1,0 +1,96 @@
+# Architecture
+
+This document is the contract between the modules. If you change an interface described here,
+update this file in the same pull request and tell the other owners.
+
+## Principle
+
+Modules communicate only through `shared/` and the SQLite database. They may call each other's
+**public entry points** listed below, but never internal helpers.
+
+```
+                    +---------------------------------------------+
+                    |                  shared/                    |
+                    | config | db (read-only) | schema | models    |
+                    | llm (providers + fallback) | charts          |
+                    +---------------------------------------------+
+                        ^            ^             ^           ^
+   data/ --builds--> [ SQLite DB ]   |             |           |
+                        ^            |             |           |
+                        |         agent/        reports/   evaluation/
+                        |            ^          modeling/      ^
+                        |            |             ^           |
+                        +------------+--- dashboard/ ----------+
+```
+
+Question flow (agent):
+
+```
+question -> describe_schema + schema_to_prompt -> LLM -> {"action": "sql" | "clarify"}
+         -> validate_read_only -> run_query -> (on SQL error: retry with the error, capped)
+         -> choose chart (rules) -> LLM explanation -> QueryResult
+```
+
+## shared/ (owner1)
+
+| Module | Interface |
+|---|---|
+| `config.py` | `get_settings(env_file=None) -> Settings` with `db_path`, `llm_provider`, `llm_model`, `llm_api_key`, `llm_fallback_provider`, `llm_fallback_model`, `llm_fallback_api_key`, `agent_max_retries` |
+| `db.py` | `run_query(sql, params=None, *, db_path=None, max_rows=10_000, timeout_s=10) -> DataFrame`; `validate_read_only(sql) -> str`; errors `UnsafeQueryError`, `QueryError`, `QueryTimeoutError`; `connect_read_only(db_path=None)` for trusted internal SQL only |
+| `schema.py` | `describe_schema(db_path=None, *, sample_values=3, tables=None) -> SchemaInfo`; `schema_to_prompt(schema, *, include_samples=True) -> str` |
+| `models.py` | `ChartSpec`, `QueryResult`, `MetricResult` (see below) |
+| `llm.py` | `get_llm(settings=None) -> LLMProvider`; `LLMProvider.complete(prompt, *, system=None, temperature=0.0, max_tokens=2048, json_mode=False) -> LLMResponse`; `register_provider(name, factory)`; errors `LLMError`, `LLMConfigError`, `LLMTransientError`, `LLMRateLimitError`; `FakeProvider` for tests |
+| `charts.py` | `render_chart(df, spec) -> plotly.graph_objects.Figure` |
+
+### Read-only guarantee
+`run_query` applies three independent layers:
+1. `validate_read_only`: one statement only, must start with `SELECT` or `WITH`, and no write or
+   admin keywords (checked after removing string literals and comments).
+2. The connection is opened with `mode=ro` and `PRAGMA query_only = ON`.
+3. An SQLite authorizer allows only read, select, function and recursive-CTE actions.
+
+It also caps rows (`df.attrs["truncated"]`) and stops queries that exceed the time limit.
+
+### Data models
+
+```python
+ChartSpec(kind: "bar"|"line"|"scatter"|"pie"|"table"|"metric", title="", x=None, y=None, color=None)
+
+QueryResult(question, sql=None, data: DataFrame | None = None, chart: ChartSpec | None = None,
+            explanation="", error=None, needs_clarification=False,
+            clarifying_question=None, attempts=0)        # .ok property
+
+MetricResult(name, value, period_start: date, period_end: date,
+             comparison_value=None, comparison_label=None, unit=None)   # .change_pct property
+```
+
+### LLM providers
+`get_llm()` returns the provider named by `LLM_PROVIDER`. If `LLM_FALLBACK_PROVIDER` is set and
+can be created, the result is wrapped in `FallbackLLM`, which retries once on the fallback
+provider when the primary fails with a transient error (rate limit, server or network error).
+Providers are plain classes registered in `shared/llm.py`; adding one (for example a locally
+hosted fine-tuned model) does not change any caller.
+
+## Database (owner1)
+SQLite file at `DB_PATH` (default `data/olist.db`), built by `python -m data.build_db` from
+`data/schema.sql`. Tables: `customers`, `sellers`, `products`, `orders`, `order_items`,
+`order_payments`, `order_reviews`, `geolocation`, plus the internal `_schema_docs`
+(descriptions used in prompts). Full schema: `docs/SCHEMA.md`.
+
+## Public entry points
+
+| Module | Entry point | Used by |
+|---|---|---|
+| agent (owner1) | `agent.SQLAgent(llm=None, settings=None).ask(question, history=None) -> QueryResult` | dashboard, evaluation |
+| reports (owner2) | `reports.weekly_report.build_report(week_end) -> WeeklyReport`; `reports.export.export_html / export_pdf / run_weekly` | dashboard, scheduler |
+| modeling (owner2) | `modeling.forecast.forecast_weekly_revenue(history, horizon_weeks=4) -> DataFrame[week, forecast, lower, upper]` | reports |
+| evaluation (owner3) | `evaluation.run_eval.run_evaluation(ask, cases) -> EvalReport`; `load_questions()`; results files in `evaluation/results/` | dashboard |
+| dashboard (owner3) | `streamlit run dashboard/app.py` | users |
+
+`run_evaluation` takes the agent as a function (`question -> QueryResult`), so it can evaluate
+any agent version or model without importing agent internals.
+
+## Testing
+- `tests/conftest.py` provides `sample_db`: a small database built from `data/schema.sql`.
+- LLM calls in tests use `shared.llm.FakeProvider`; CI needs no API keys or dataset download.
+- Each module has its own test folder under `tests/`.

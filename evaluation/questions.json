@@ -1,0 +1,18 @@
+[
+  {
+    "id": "q001",
+    "question": "How many orders have been delivered?",
+    "gold_sql": "SELECT COUNT(*) AS delivered_orders FROM orders WHERE status = 'delivered'",
+    "category": "aggregation",
+    "difficulty": "easy",
+    "ordered": false
+  },
+  {
+    "id": "q002",
+    "question": "Which 5 product categories sold the most items?",
+    "gold_sql": "SELECT p.category, COUNT(*) AS items_sold FROM order_items oi JOIN products p ON p.product_id = oi.product_id GROUP BY p.category ORDER BY items_sold DESC LIMIT 5",
+    "category": "join + ranking",
+    "difficulty": "medium",
+    "ordered": true
+  }
+]

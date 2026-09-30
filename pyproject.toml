@@ -1,0 +1,19 @@
+[project]
+name = "nl-data-assistant"
+version = "0.1.0"
+description = "Natural-language data assistant and automated weekly report for an e-commerce dataset."
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["data/raw"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--import-mode=importlib"
