@@ -167,7 +167,9 @@ def schema_to_prompt(schema: SchemaInfo, *, include_samples: bool = True) -> str
             line = " ".join(parts)
             if col.description:
                 line += f" | {col.description}"
-            if include_samples and col.sample_values:
+            # Sample values of id columns are random hashes and only cost tokens.
+            is_id = col.is_pk or col.fk_ref or col.name.endswith("_id")
+            if include_samples and col.sample_values and not is_id:
                 line += " | samples: " + ", ".join(repr(v) for v in col.sample_values)
             lines.append(line)
         lines.append("")

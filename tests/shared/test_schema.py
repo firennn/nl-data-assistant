@@ -36,3 +36,11 @@ def test_schema_to_prompt(sample_db):
     assert "customer_id TEXT FK -> customers.customer_id" in text
     assert "samples:" in text
     assert "samples:" not in schema_to_prompt(describe_schema(sample_db), include_samples=False)
+
+
+def test_schema_to_prompt_skips_samples_for_id_columns(sample_db):
+    lines = schema_to_prompt(describe_schema(sample_db)).splitlines()
+    order_id_line = next(line for line in lines if line.strip().startswith("- order_id"))
+    status_line = next(line for line in lines if line.strip().startswith("- status"))
+    assert "samples:" not in order_id_line
+    assert "samples:" in status_line
