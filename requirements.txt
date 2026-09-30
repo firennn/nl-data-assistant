@@ -2,6 +2,7 @@ pandas>=2.1
 python-dotenv>=1.0
 plotly>=5.20
 streamlit>=1.35
+kagglehub>=0.3
 # LLM provider SDKs (used only by shared/llm.py)
 google-genai>=1.0
 groq>=0.11
