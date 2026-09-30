@@ -34,8 +34,9 @@ def run_weekly(week_end: str | None = None) -> Path:
     """Entry point for the scheduled job: build the report and export it.
 
     TODO(owner2):
-    - Parse week_end (YYYY-MM-DD); default to the last full week in the dataset.
-    - Provide `python -m reports.export --week-end 2018-08-26` and document how to schedule it
+    - Parse week_end (YYYY-MM-DD); default to the last full week in the dataset
+      (2018-08-19, see docs/SCHEMA.md "Known data limitations").
+    - Provide `python -m reports.export --week-end 2018-08-19` and document how to schedule it
       (Windows Task Scheduler / cron / GitHub Actions schedule).
     """
     raise NotImplementedError
