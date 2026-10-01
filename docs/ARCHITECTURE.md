@@ -36,7 +36,7 @@ question -> describe_schema + schema_to_prompt -> LLM -> {"action": "sql" | "cla
 | Module | Purpose |
 |---|---|
 | `sql_agent.py` | `SQLAgent.ask(question, history=None) -> QueryResult` — the only entry point other modules use |
-| `prompts.py` | System prompts, examples and prompt builders for SQL generation and explanations |
+| `prompts.py` | Generic system prompts and examples, plus builders that add a `DatasetProfile` (`build_sql_system`, `build_explain_system`, `build_sql_prompt`, `build_explain_prompt`) |
 | `chart_selector.py` | `choose_chart(df, title="") -> ChartSpec`, deterministic rules |
 | `cli.py` | `python -m agent.cli "question"` or interactive mode; `--chart out.html` saves the chart |
 
@@ -55,6 +55,11 @@ Behavior of `ask`:
   one category + one number (<= 20 rows) -> bar; two numbers -> scatter; otherwise table.
 - The explanation is 2-4 sentences from a second LLM call; if that call fails, a short summary
   is used so the answer is still returned.
+- The prompts are generic; dataset-specific context comes from the `profile` argument
+  (a `DatasetProfile`, default `shared.profiles.OLIST_PROFILE`). Pass a profile for any other
+  database, e.g. an uploaded one. Without a date range in the profile, relative periods
+  ("last month") are taken relative to the latest date in the data. Sample values are read and
+  sent to the LLM only if `profile.include_samples` is true.
 
 ## shared/ (owner1)
 
@@ -63,7 +68,8 @@ Behavior of `ask`:
 | `config.py` | `get_settings(env_file=None) -> Settings` with `db_path`, `llm_provider`, `llm_model`, `llm_api_key`, `llm_fallback_provider`, `llm_fallback_model`, `llm_fallback_api_key`, `agent_max_retries` |
 | `db.py` | `run_query(sql, params=None, *, db_path=None, max_rows=10_000, timeout_s=10) -> DataFrame`; `validate_read_only(sql) -> str`; errors `UnsafeQueryError`, `QueryError`, `QueryTimeoutError`; `connect_read_only(db_path=None)` for trusted internal SQL only |
 | `schema.py` | `describe_schema(db_path=None, *, sample_values=3, tables=None) -> SchemaInfo`; `schema_to_prompt(schema, *, include_samples=True) -> str` |
-| `models.py` | `ChartSpec`, `QueryResult`, `MetricResult` (see below) |
+| `models.py` | `ChartSpec`, `QueryResult`, `MetricResult`, `DatasetProfile` (see below) |
+| `profiles.py` | `OLIST_PROFILE`: business rules, currency, date range and examples for the demo database |
 | `llm.py` | `get_llm(settings=None) -> LLMProvider`; `LLMProvider.complete(prompt, *, system=None, temperature=0.0, max_tokens=2048, json_mode=False) -> LLMResponse`; `register_provider(name, factory)`; errors `LLMError`, `LLMConfigError`, `LLMTransientError`, `LLMRateLimitError`, `LLMQuotaExceededError`; `FakeProvider` for tests |
 | `charts.py` | `render_chart(df, spec) -> plotly.graph_objects.Figure` |
 
@@ -87,7 +93,19 @@ QueryResult(question, sql=None, data: DataFrame | None = None, chart: ChartSpec 
 
 MetricResult(name, value, period_start: date, period_end: date,
              comparison_value=None, comparison_label=None, unit=None)   # .change_pct property
+
+DatasetProfile(name,
+               description="",                  # e.g. "an e-commerce marketplace (Olist, Brazil)"
+               rules: list[str] = [],           # business rules, one prompt line each
+               currency=None,                   # e.g. "Brazilian reais (BRL)"
+               currency_format=None,            # e.g. "R$ 1,234.56", used in explanations
+               date_range: tuple[str, str] | None = None,  # ("YYYY-MM-DD", "YYYY-MM-DD")
+               examples="",                     # dataset-specific examples; "" = generic ones
+               filter_example=None,             # how to word a filter in explanations
+               include_samples=False)           # sample values in the schema text
 ```
+`DatasetProfile` defaults are deliberately minimal: a new profile sends no sample values to the
+LLM unless it sets `include_samples=True`.
 
 ### LLM providers
 `get_llm()` returns the provider named by `LLM_PROVIDER`. If `LLM_FALLBACK_PROVIDER` is set and
@@ -111,7 +129,7 @@ SQLite file at `DB_PATH` (default `data/olist.db`), built by `python -m data.bui
 
 | Module | Entry point | Used by |
 |---|---|---|
-| agent (owner1) | `agent.SQLAgent(llm=None, settings=None, *, db_path=None, max_rows=1000).ask(question, history=None) -> QueryResult` | dashboard, evaluation |
+| agent (owner1) | `agent.SQLAgent(llm=None, settings=None, *, db_path=None, max_rows=1000, profile=None).ask(question, history=None) -> QueryResult` | dashboard, evaluation |
 | reports (owner2) | `reports.export.generate_report(week_end=None, *, out_dir=None, db_path=None, llm=None, pdf=False) -> ReportResult(html_path, json_path, summary, pdf_path)`; `reports.weekly_report.build_report(week_end, *, db_path=None, llm=None, config=None) -> WeeklyReport`; `reports.export.export_html / export_pdf / run_weekly`; CLI `python -m reports.export --week-end YYYY-MM-DD [--pdf]` | dashboard, scheduler |
 | modeling (owner2) | `modeling.forecast.forecast_weekly_revenue(history, horizon_weeks=4) -> DataFrame[week, forecast, lower, upper]` (attrs: model, beats_baseline, scores); retrain with `python -m modeling.train` | reports |
 | evaluation (owner3) | `evaluation.run_eval.run_evaluation(ask, cases) -> EvalReport`; `load_questions()`; results files in `evaluation/results/` | dashboard |

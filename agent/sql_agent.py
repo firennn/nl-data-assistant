@@ -15,11 +15,17 @@ from pathlib import Path
 import pandas as pd
 
 from agent.chart_selector import choose_chart
-from agent.prompts import EXPLAIN_SYSTEM, SQL_SYSTEM, build_explain_prompt, build_sql_prompt
+from agent.prompts import (
+    build_explain_prompt,
+    build_explain_system,
+    build_sql_prompt,
+    build_sql_system,
+)
 from shared.config import Settings, get_settings
 from shared.db import QueryError, QueryTimeoutError, UnsafeQueryError, run_query, validate_read_only
 from shared.llm import LLMError, LLMProvider, get_llm
-from shared.models import QueryResult
+from shared.models import DatasetProfile, QueryResult
+from shared.profiles import OLIST_PROFILE
 from shared.schema import describe_schema, schema_to_prompt
 
 logger = logging.getLogger(__name__)
@@ -70,6 +76,7 @@ class SQLAgent:
         *,
         db_path: str | Path | None = None,
         max_rows: int = 1000,
+        profile: DatasetProfile | None = None,
     ) -> None:
         """
         Args:
@@ -77,11 +84,16 @@ class SQLAgent:
             settings: project settings; defaults to shared.config.get_settings().
             db_path: database to query; defaults to settings.db_path.
             max_rows: maximum rows returned per query (the result is marked as truncated).
+            profile: business rules and context for the database; defaults to the Olist
+                profile. Pass a profile for any other database, e.g. an uploaded one.
         """
         self._settings = settings or get_settings()
         self._llm = llm
         self._db_path = Path(db_path) if db_path else self._settings.db_path
         self._max_rows = max_rows
+        self._profile = profile or OLIST_PROFILE
+        self._sql_system = build_sql_system(self._profile)
+        self._explain_system = build_explain_system(self._profile)
         self._schema_text: str | None = None
 
     @property
@@ -94,10 +106,19 @@ class SQLAgent:
     def max_attempts(self) -> int:
         return 1 + max(0, self._settings.agent_max_retries)
 
+    @property
+    def profile(self) -> DatasetProfile:
+        return self._profile
+
     def schema_text(self) -> str:
-        """Schema description used in prompts (computed once per agent)."""
+        """Schema description used in prompts (computed once per agent).
+
+        Sample values are only read and included if the profile allows it.
+        """
         if self._schema_text is None:
-            self._schema_text = schema_to_prompt(describe_schema(self._db_path))
+            samples = self._profile.include_samples
+            schema = describe_schema(self._db_path, sample_values=3 if samples else 0)
+            self._schema_text = schema_to_prompt(schema, include_samples=samples)
         return self._schema_text
 
     def ask(self, question: str, history: list[tuple[str, str]] | None = None) -> QueryResult:
@@ -124,9 +145,11 @@ class SQLAgent:
         failed: list[tuple[str, str]] = []
         last_sql: str | None = None
         for attempt in range(1, self.max_attempts + 1):
-            prompt = build_sql_prompt(question, schema_text, history, failed)
+            prompt = build_sql_prompt(
+                question, schema_text, history, failed, examples=self._profile.examples
+            )
             try:
-                reply_text = self.llm.complete(prompt, system=SQL_SYSTEM, json_mode=True).text
+                reply_text = self.llm.complete(prompt, system=self._sql_system, json_mode=True).text
             except LLMError as exc:
                 return QueryResult(
                     question=question,
@@ -203,7 +226,7 @@ class SQLAgent:
         try:
             text = self.llm.complete(
                 build_explain_prompt(question, sql, df, assumptions),
-                system=EXPLAIN_SYSTEM,
+                system=self._explain_system,
                 temperature=0.2,
                 max_tokens=400,
             ).text.strip()
