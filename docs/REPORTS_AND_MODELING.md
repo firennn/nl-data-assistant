@@ -8,6 +8,7 @@ This page describes the automated weekly report (`reports/`) and the revenue for
 
 ```bash
 python -m reports.export --week-end 2018-08-19   # writes reports/output/weekly_report_2018-08-19.html and .json
+python -m reports.export --pdf                   # also writes the PDF version
 python -m modeling.train                         # retrains the forecast, writes modeling/artifacts/*.json
 ```
 
@@ -126,8 +127,13 @@ anomaly detector on hand-made series (spikes, drops, no look-ahead), the forecas
 (training only on the past, falling back to the baseline), the number check in the summary,
 and every section of the HTML and JSON output.
 
+## PDF version
+
+`python -m reports.export --pdf` (or `generate_report(..., pdf=True)`) also writes a three-page
+A4 PDF: summary and key metrics, the three charts, and the changes, anomalies and forecast. It
+is drawn with matplotlib from the same chart data as the HTML report, so both show the same
+numbers, and it needs no browser.
+
 ## Not included yet
 
-- PDF export: needs a new library in `requirements.txt`; the HTML report can be printed to PDF
-  from a browser.
 - A scheduled GitHub Actions workflow: an example is in `reports/README.md`.
