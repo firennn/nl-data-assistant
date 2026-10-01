@@ -17,7 +17,7 @@ From Python (this is what the dashboard calls):
 from reports.export import generate_report
 
 result = generate_report("2018-08-19")
-result.html_path, result.json_path, result.summary   # summary is a JSON-ready dict
+result.html_path, result.json_path, result.summary  # summary is a JSON-ready dict
 ```
 
 The data is complete from 2017-01-01 to about 2018-08-21, so 2018-08-19 is the last full week
