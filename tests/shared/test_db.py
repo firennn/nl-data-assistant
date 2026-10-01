@@ -115,3 +115,30 @@ def test_connection_is_read_only_even_without_validator(sample_db):
 def test_missing_database_has_helpful_message(tmp_path):
     with pytest.raises(FileNotFoundError, match="data.build_db"):
         run_query("SELECT 1", db_path=tmp_path / "missing.db")
+
+
+def test_connection_does_not_trust_the_schema(sample_db):
+    conn = connect_read_only(sample_db)
+    try:
+        assert conn.execute("PRAGMA trusted_schema").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_view_in_the_file_cannot_call_functions_with_side_effects(tmp_path):
+    db = tmp_path / "untrusted.db"
+    with sqlite3.connect(db) as setup:
+        setup.execute("CREATE TABLE t (x)")
+        setup.execute("INSERT INTO t VALUES (1)")
+        setup.execute("CREATE VIEW v AS SELECT side_effect(x) AS y FROM t")
+    setup.close()
+
+    calls = []
+    conn = connect_read_only(db)
+    try:
+        conn.create_function("side_effect", 1, lambda x: calls.append(x) or x)
+        with pytest.raises(sqlite3.OperationalError, match="unsafe use of side_effect"):
+            conn.execute("SELECT * FROM v").fetchall()
+    finally:
+        conn.close()
+    assert calls == []

@@ -26,7 +26,7 @@ from shared.db import QueryError, QueryTimeoutError, UnsafeQueryError, run_query
 from shared.llm import LLMError, LLMProvider, get_llm
 from shared.models import DatasetProfile, QueryResult
 from shared.profiles import OLIST_PROFILE
-from shared.schema import describe_schema, schema_to_prompt
+from shared.schema import SCHEMA_MAX_CHARS, describe_schema, schema_to_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -113,12 +113,15 @@ class SQLAgent:
     def schema_text(self) -> str:
         """Schema description used in prompts (computed once per agent).
 
-        Sample values are only read and included if the profile allows it.
+        Sample values are only read and included if the profile allows it. The text is kept
+        within SCHEMA_MAX_CHARS. Raises FileNotFoundError or QueryError (incl. timeouts).
         """
         if self._schema_text is None:
             samples = self._profile.include_samples
             schema = describe_schema(self._db_path, sample_values=3 if samples else 0)
-            self._schema_text = schema_to_prompt(schema, include_samples=samples)
+            self._schema_text = schema_to_prompt(
+                schema, include_samples=samples, max_chars=SCHEMA_MAX_CHARS
+            )
         return self._schema_text
 
     def ask(self, question: str, history: list[tuple[str, str]] | None = None) -> QueryResult:
@@ -131,7 +134,8 @@ class SQLAgent:
 
         Returns a QueryResult that is either ok (sql + data + chart + explanation),
         needs_clarification (with clarifying_question), or has an error message.
-        Never raises for bad SQL or unsafe queries; those are reported in the result.
+        Never raises for bad SQL, unsafe queries or an unreadable database; those are
+        reported in the result.
         """
         question = (question or "").strip()
         if not question:
@@ -139,7 +143,7 @@ class SQLAgent:
 
         try:
             schema_text = self.schema_text()
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, QueryError) as exc:
             return QueryResult(question=question, error=str(exc))
 
         failed: list[tuple[str, str]] = []

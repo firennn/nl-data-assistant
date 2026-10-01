@@ -6,10 +6,11 @@ import pytest
 
 from agent.sql_agent import ReplyFormatError, SQLAgent, parse_reply
 from shared.config import Settings
-from shared.db import run_query
+from shared.db import QueryTimeoutError, run_query
 from shared.llm import FakeProvider, LLMError, LLMRateLimitError
 from shared.models import DatasetProfile
 from shared.profiles import OLIST_PROFILE
+from shared.schema import SCHEMA_MAX_CHARS
 
 
 def sql_reply(sql: str, assumptions: str = "") -> str:
@@ -281,6 +282,46 @@ def test_samples_are_not_read_when_the_profile_excludes_them(sample_db, monkeypa
     )
     agent.schema_text()
     assert seen["sample_values"] == 0
+
+
+def test_file_that_is_not_a_database_is_reported(tmp_path):
+    fake = tmp_path / "upload.sqlite"
+    fake.write_text("name,age\nana,31\n")
+    llm = FakeProvider([])
+    agent = SQLAgent(llm=llm, settings=Settings(db_path=fake))
+    result = agent.ask("How many rows?")
+    assert not result.ok
+    assert result.error == "Could not read the database: file is not a database."
+    assert llm.calls == []
+
+
+def test_schema_timeout_is_reported(sample_db, monkeypatch):
+    import agent.sql_agent as module
+
+    def slow(*_args, **_kwargs):
+        raise QueryTimeoutError("Reading the database structure took longer than 10s.")
+
+    monkeypatch.setattr(module, "describe_schema", slow)
+    agent, llm = make_agent(sample_db, [])
+    result = agent.ask("How many orders?")
+    assert not result.ok and "took longer than 10s" in result.error
+    assert llm.calls == []
+
+
+def test_agent_limits_the_schema_text(sample_db, monkeypatch):
+    import agent.sql_agent as module
+
+    seen = {}
+    real = module.schema_to_prompt
+
+    def spy(schema, **kw):
+        seen.update(kw)
+        return real(schema, **kw)
+
+    monkeypatch.setattr(module, "schema_to_prompt", spy)
+    agent, _ = make_agent(sample_db, [])
+    agent.schema_text()
+    assert seen["max_chars"] == SCHEMA_MAX_CHARS == 12_000
 
 
 def test_parse_reply_refuse():
