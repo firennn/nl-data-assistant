@@ -26,6 +26,7 @@ modeling/artifacts/
 
 # Report outputs
 reports/output/
+evaluation/results/
 
 # Editors / OS
 .vscode/
