@@ -112,7 +112,7 @@ SQLite file at `DB_PATH` (default `data/olist.db`), built by `python -m data.bui
 | Module | Entry point | Used by |
 |---|---|---|
 | agent (owner1) | `agent.SQLAgent(llm=None, settings=None, *, db_path=None, max_rows=1000).ask(question, history=None) -> QueryResult` | dashboard, evaluation |
-| reports (owner2) | `reports.export.generate_report(week_end=None, *, out_dir=None, db_path=None, llm=None) -> ReportResult(html_path, json_path, summary)`; `reports.weekly_report.build_report(week_end, *, db_path=None, llm=None, config=None) -> WeeklyReport`; `reports.export.export_html / export_pdf / run_weekly`; CLI `python -m reports.export --week-end YYYY-MM-DD` | dashboard, scheduler |
+| reports (owner2) | `reports.export.generate_report(week_end=None, *, out_dir=None, db_path=None, llm=None, pdf=False) -> ReportResult(html_path, json_path, summary, pdf_path)`; `reports.weekly_report.build_report(week_end, *, db_path=None, llm=None, config=None) -> WeeklyReport`; `reports.export.export_html / export_pdf / run_weekly`; CLI `python -m reports.export --week-end YYYY-MM-DD [--pdf]` | dashboard, scheduler |
 | modeling (owner2) | `modeling.forecast.forecast_weekly_revenue(history, horizon_weeks=4) -> DataFrame[week, forecast, lower, upper]` (attrs: model, beats_baseline, scores); retrain with `python -m modeling.train` | reports |
 | evaluation (owner3) | `evaluation.run_eval.run_evaluation(ask, cases) -> EvalReport`; `load_questions()`; results files in `evaluation/results/` | dashboard |
 | dashboard (owner3) | `streamlit run dashboard/app.py` | users |

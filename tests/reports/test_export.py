@@ -1,6 +1,8 @@
-"""HTML export, JSON summary, generate_report and the command line, on the fixture database."""
+"""HTML and PDF export, JSON summary, generate_report and the command line, on the fixture
+database."""
 
 import json
+import re
 from datetime import date
 
 import pytest
@@ -11,6 +13,7 @@ from reports.export import (
     export_html,
     export_pdf,
     generate_report,
+    report_notes,
     report_to_dict,
     run_weekly,
 )
@@ -123,9 +126,52 @@ def test_command_line_rejects_a_bad_date(capsys):
     assert "YYYY-MM-DD" in capsys.readouterr().err
 
 
-def test_pdf_export_is_not_available_yet(report):
-    with pytest.raises(NotImplementedError, match="print it to PDF"):
-        export_pdf(report)
+def pdf_pages(path):
+    return len(re.findall(rb"/Type\s*/Page(?!s)", path.read_bytes()))
+
+
+def test_export_pdf_writes_a_three_page_pdf(report, tmp_path):
+    path = export_pdf(report, tmp_path / "report.pdf")
+    assert path == tmp_path / "report.pdf"
+    assert path.read_bytes().startswith(b"%PDF")
+    assert pdf_pages(path) == 3
+
+
+def test_pdf_handles_a_week_without_sales(sample_db, tmp_path):
+    # Only a canceled order in this week: empty bar charts and no revenue.
+    quiet = build_report(date(2018, 1, 14), db_path=sample_db, llm=FakeProvider([LLMError("x")]))
+    assert pdf_pages(export_pdf(quiet, tmp_path / "quiet.pdf")) == 3
+
+
+def test_pdf_default_path_uses_the_week_end(report, tmp_path, monkeypatch):
+    monkeypatch.setattr(export, "OUTPUT_DIR", tmp_path)
+    assert export_pdf(report) == tmp_path / "weekly_report_2018-01-07.pdf"
+
+
+def test_generate_report_writes_the_pdf_only_when_asked(sample_db, tmp_path):
+    args = dict(out_dir=tmp_path, db_path=sample_db)
+    without = generate_report("2018-01-07", llm=FakeProvider([SUMMARY]), **args)
+    assert without.pdf_path is None
+    assert not (tmp_path / "weekly_report_2018-01-07.pdf").exists()
+    with_pdf = generate_report("2018-01-07", llm=FakeProvider([SUMMARY]), pdf=True, **args)
+    assert with_pdf.pdf_path == tmp_path / "weekly_report_2018-01-07.pdf"
+    assert pdf_pages(with_pdf.pdf_path) == 3
+
+
+def test_command_line_pdf_option(sample_db, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(export, "build_report", _fixture_report(sample_db))
+    export.main(
+        ["--week-end", "2018-01-07", "--out", str(tmp_path), "--db", str(sample_db), "--pdf"]
+    )
+    assert "PDF:" in capsys.readouterr().out
+    assert (tmp_path / "weekly_report_2018-01-07.pdf").exists()
+
+
+def test_html_and_pdf_share_the_same_notes(report):
+    notes = report_notes(report)
+    assert set(notes) == {"summary", "changes", "anomalies", "forecast"}
+    assert notes["summary"] == ""  # the LLM summary was used
+    assert "28 days" in notes["anomalies"]
 
 
 def _fixture_report(sample_db):

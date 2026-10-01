@@ -2,6 +2,7 @@
 
     python -m reports.export                         # last full week in the data (2018-08-19)
     python -m reports.export --week-end 2018-08-19 --out reports/output
+    python -m reports.export --pdf                   # also write the PDF version
 
 Scheduling examples (cron, Windows Task Scheduler, GitHub Actions) are in reports/README.md.
 """
@@ -48,6 +49,7 @@ class ReportResult:
     html_path: Path
     json_path: Path
     summary: dict
+    pdf_path: Path | None = None
 
 
 def export_html(report: WeeklyReport, path: Path | None = None) -> Path:
@@ -81,15 +83,12 @@ def export_html(report: WeeklyReport, path: Path | None = None) -> Path:
 
 
 def export_pdf(report: WeeklyReport, path: Path | None = None) -> Path:
-    """Write the report as a PDF and return its path.
+    """Write the report as a three-page A4 PDF (summary and metrics, charts, details) and
+    return its path. Drawn with matplotlib; see reports/pdf.py."""
+    from reports.pdf import write_pdf  # matplotlib is only loaded when a PDF is requested
 
-    TODO(owner2):
-    - Pick the lightest option that works on Windows and in CI (for example, static chart
-      images plus a simple PDF layout) and record the choice in docs/DECISIONS.md.
-    """
-    raise NotImplementedError(
-        "PDF export is not available yet; open the HTML report in a browser and print it to PDF."
-    )
+    path = Path(path) if path else OUTPUT_DIR / f"weekly_report_{report.week_end}.pdf"
+    return write_pdf(report, path, report_notes(report))
 
 
 def report_to_dict(report: WeeklyReport) -> dict:
@@ -129,9 +128,11 @@ def generate_report(
     db_path: str | Path | None = None,
     llm: LLMProvider | None = None,
     config: AnomalyConfig | None = None,
+    pdf: bool = False,
 ) -> ReportResult:
     """Build the report for the week ending on `week_end` (default: the last full week in the
-    data), write the HTML file and a JSON summary next to it, and return both."""
+    data), write the HTML file and a JSON summary next to it (and the PDF if `pdf`), and
+    return the paths and the summary."""
     week = _parse_week_end(week_end)
     report = build_report(week, db_path=db_path, llm=llm, config=config)
     out_dir = Path(out_dir) if out_dir else OUTPUT_DIR
@@ -139,7 +140,10 @@ def generate_report(
     summary = report_to_dict(report)
     json_path = out_dir / f"weekly_report_{report.week_end}.json"
     json_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    return ReportResult(html_path=html_path, json_path=json_path, summary=summary)
+    pdf_path = export_pdf(report, out_dir / f"weekly_report_{report.week_end}.pdf") if pdf else None
+    return ReportResult(
+        html_path=html_path, json_path=json_path, summary=summary, pdf_path=pdf_path
+    )
 
 
 def run_weekly(
@@ -148,9 +152,11 @@ def run_weekly(
     out_dir: Path | None = None,
     db_path: str | Path | None = None,
     llm: LLMProvider | None = None,
+    pdf: bool = False,
 ) -> Path:
     """Entry point for the scheduled job: build the report, export it, return the HTML path."""
-    return generate_report(week_end, out_dir=out_dir, db_path=db_path, llm=llm).html_path
+    result = generate_report(week_end, out_dir=out_dir, db_path=db_path, llm=llm, pdf=pdf)
+    return result.html_path
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -162,14 +168,17 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--out", type=Path, default=None, help="output folder")
     parser.add_argument("--db", type=Path, default=None, help="database file (default DB_PATH)")
+    parser.add_argument("--pdf", action="store_true", help="also write the PDF version")
     args = parser.parse_args(argv)
     try:
-        result = generate_report(args.week_end, out_dir=args.out, db_path=args.db)
+        result = generate_report(args.week_end, out_dir=args.out, db_path=args.db, pdf=args.pdf)
     except ValueError as exc:
         parser.error(str(exc))
     print(f"Report for {result.summary['week_start']} to {result.summary['week_end']}")
     print(f"  HTML: {result.html_path}")
     print(f"  JSON: {result.json_path}")
+    if result.pdf_path:
+        print(f"  PDF:  {result.pdf_path}")
     print(f"  Summary: {result.summary['summary_source']}")
 
 
@@ -184,14 +193,52 @@ def _parse_week_end(value: date | str | None) -> date:
         raise ValueError(f"week_end must be YYYY-MM-DD, got {value!r}.") from exc
 
 
-def _summary_html(report: WeeklyReport) -> str:
-    note = ""
+def report_notes(report: WeeklyReport) -> dict[str, str]:
+    """Plain-text notes on the summary, methods and forecast, shared by the HTML and PDF."""
+    config = AnomalyConfig()
+    notes = {
+        "summary": "",
+        "changes": f"No metric changed by {config.change_threshold_pct:g}% or more compared "
+        "with the previous week.",
+        "anomalies": f"Each day is compared with the average of the {config.daily_window} days "
+        f"before it; a day is flagged when it is at least {config.z_threshold:g} standard "
+        "deviations away (z-score). Weekday patterns are not modeled, and a day after a large "
+        "spike has a raised baseline.",
+        "forecast": "",
+    }
     if report.summary_source == "fallback":
-        note = (
-            '<p class="muted">The LLM summary was not available or used a number that is not '
-            "in the report, so this summary lists the computed facts.</p>"
+        notes["summary"] = (
+            "The LLM summary was not available or used a number that is not in the report, "
+            "so this summary lists the computed facts."
         )
-    return f'<h2>Summary</h2>\n<div class="summary"><p>{escape(report.summary)}</p></div>{note}'
+    forecast = report.forecast
+    if forecast is not None and not forecast.empty:
+        model = forecast.attrs.get("model", "")
+        scores = forecast.attrs.get("scores") or {}
+        if not scores:
+            notes["forecast"] = (
+                "There is too little history to test a model, so the forecast repeats last week."
+            )
+        elif forecast.attrs.get("beats_baseline"):
+            notes["forecast"] = (
+                f"Model: {model}. In backtesting it beat the naive baseline (last week's value): "
+                f"average error {format_number(scores[model]['mae'], 'BRL')} vs "
+                f"{format_number(scores['naive']['mae'], 'BRL')}."
+            )
+        else:
+            notes["forecast"] = (
+                "The forecast model did not beat the naive baseline in backtesting, so the naive "
+                "forecast (last week's revenue) is shown."
+            )
+    return notes
+
+
+def _summary_html(report: WeeklyReport) -> str:
+    note = report_notes(report)["summary"]
+    note_html = f'<p class="muted">{escape(note)}</p>' if note else ""
+    return (
+        f'<h2>Summary</h2>\n<div class="summary"><p>{escape(report.summary)}</p></div>{note_html}'
+    )
 
 
 def _kpi_html(report: WeeklyReport) -> str:
@@ -225,11 +272,8 @@ def _charts_html(report: WeeklyReport) -> str:
 def _changes_html(report: WeeklyReport) -> str:
     changes = report.metric_changes
     if changes is None or changes.empty:
-        threshold = AnomalyConfig().change_threshold_pct
-        return (
-            "<h2>Week-over-week changes</h2>\n"
-            f"<p>No metric changed by {threshold:g}% or more compared with the previous week.</p>"
-        )
+        note = escape(report_notes(report)["changes"])
+        return f"<h2>Week-over-week changes</h2>\n<p>{note}</p>"
     rows = "\n".join(
         f"<tr><td>{escape(r.metric)}</td><td>{format_number(r.value, r.unit)}</td>"
         f"<td>{format_number(r.previous, r.unit)}</td><td>{r.change_pct:+.1f}%</td></tr>"
@@ -243,13 +287,7 @@ def _changes_html(report: WeeklyReport) -> str:
 
 
 def _anomalies_html(report: WeeklyReport) -> str:
-    config = AnomalyConfig()
-    method = (
-        f'<p class="muted">Each day is compared with the average of the {config.daily_window} '
-        f"days before it; a day is flagged when it is at least {config.z_threshold:g} standard "
-        "deviations away (z-score). Weekday patterns are not modeled, and a day after a large "
-        "spike has a raised baseline.</p>"
-    )
+    method = f'<p class="muted">{escape(report_notes(report)["anomalies"])}</p>'
     if report.anomalies is None or report.anomalies.empty:
         return f"<h2>Anomalies</h2>\n<p>No daily anomalies in revenue or orders.</p>{method}"
     rows = "\n".join(
@@ -273,21 +311,7 @@ def _forecast_html(report: WeeklyReport) -> str:
         f"<td>{format_number(r.lower, 'BRL')}</td><td>{format_number(r.upper, 'BRL')}</td></tr>"
         for r in forecast.itertuples()
     )
-    model = forecast.attrs.get("model", "")
-    scores = forecast.attrs.get("scores") or {}
-    if not scores:
-        note = "There is too little history to test a model, so the forecast repeats last week."
-    elif forecast.attrs.get("beats_baseline"):
-        note = (
-            f"Model: {escape(model)}. In backtesting it beat the naive baseline (last week's "
-            f"value): average error {format_number(scores[model]['mae'], 'BRL')} vs "
-            f"{format_number(scores['naive']['mae'], 'BRL')}."
-        )
-    else:
-        note = (
-            "The forecast model did not beat the naive baseline in backtesting, so the naive "
-            "forecast (last week's revenue) is shown."
-        )
+    note = escape(report_notes(report)["forecast"])
     return (
         "<h2>Revenue forecast</h2>\n"
         '<div class="table-wrap"><table><tr><th>Week starting</th><th>Forecast</th>'

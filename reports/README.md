@@ -10,20 +10,22 @@ executive summary.
 python -m reports.export                         # last full week in the data (2018-08-19)
 python -m reports.export --week-end 2018-08-12   # any other week (the 7 days ending that day)
 python -m reports.export --out some/folder --db data/olist.db
+python -m reports.export --pdf                   # also write the PDF version
 ```
 
 Each run writes two files to `reports/output/` (not tracked by git):
 
 - `weekly_report_<week_end>.html`: the report (charts load Plotly from its CDN)
 - `weekly_report_<week_end>.json`: the same results as data, for the dashboard or other tools
+- `weekly_report_<week_end>.pdf` (with `--pdf`): a three-page A4 version of the report
 
 From Python:
 
 ```python
 from reports.export import generate_report
 
-result = generate_report("2018-08-19")
-result.html_path, result.json_path, result.summary
+result = generate_report("2018-08-19", pdf=True)
+result.html_path, result.json_path, result.pdf_path, result.summary
 ```
 
 The summary is written by the LLM configured in `.env`. Without an API key, or if the summary
