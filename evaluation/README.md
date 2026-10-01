@@ -71,6 +71,50 @@ For each question this runs `gold_sql`, `check_sql` and every `alt_sql` on the d
 checks that the gold and check queries agree and that the gold result still equals `expected`.
 It needs the full database (`python -m data.build_db`).
 
+## Running the evaluation
+
+```bash
+python -m evaluation.run_eval                            # provider and model from .env, Olist profile
+python -m evaluation.run_eval --provider groq            # the other provider configured in .env
+python -m evaluation.run_eval --model <name>             # another model of the same provider
+python -m evaluation.run_eval --profile no-rules         # Olist without its business rules and examples
+python -m evaluation.run_eval --resume evaluation/results/<run>.json   # finish an interrupted run
+python -m evaluation.run_eval --compare <run a>.json <run b>.json      # compare runs side by side
+python -m evaluation.run_eval --summary evaluation/results/<run>.json
+```
+
+`--ids q001,q005`, `--limit N` and `--delay SECONDS` run a subset or slow the run down for
+per-minute rate limits. Each question costs about two LLM requests (the SQL and the
+explanation). The fallback provider is turned off during a run, so every run measures exactly
+one model.
+
+The agent is passed to `run_evaluation(ask, cases)` as a function, so any agent version or
+model can be evaluated. A prediction is scored against what the question expects:
+
+| `expect` | Correct when |
+|---|---|
+| `answer` | the result data matches the gold result |
+| `clarify_or_answer` | the agent asks a clarifying question, or the data matches the gold result or an `alt_sql` reading |
+| `refuse` | the agent refuses (no data and no clarifying question) |
+
+Every failure gets a type: `sql_error`, `wrong_values`, `wrong_row_count`, `missing_columns`,
+`row_order`, `unnecessary_clarification`, `wrongly_refused`, `not_refused` or `agent_error`.
+An unavailable LLM provider (`llm_error`, e.g. a used-up quota) or a failing reference query
+(`gold_error`) is not the agent's fault: those questions are reported as "not scored", left out
+of the accuracy, and asked again with `--resume`.
+
+### Results files
+
+Each run writes `evaluation/results/<date>-<time>_<label>.json` after every question (the
+folder is not committed):
+
+- `meta`: label, provider, model, profile, retry limit, a hash of `questions.json` and dates,
+- `summary`: accuracy overall and by category, difficulty and skill, failure types, timings,
+- `records`: one entry per question with the predicted SQL, outcome, failure type and reason.
+
+`evaluation/metrics.py` computes the summaries and comparisons from these files; the dashboard
+uses the same functions.
+
 ## Adding a question
 
 1. Write the question, `gold_sql` and an independent `check_sql` (a different query shape, such
