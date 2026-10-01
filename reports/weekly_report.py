@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from reports.anomalies import rolling_zscore
 from reports.metrics import METRICS
 from shared.models import ChartSpec, MetricResult
 
@@ -74,12 +75,11 @@ def detect_anomalies(
 ) -> pd.DataFrame:
     """Flag points in a daily or weekly series that deviate strongly from the recent trend.
 
-    TODO(owner2):
-    - Start with a rolling mean/std z-score over `window` periods (no look-ahead).
-    - Return a DataFrame with columns: date, value, expected, z_score (only flagged rows).
-    - Document the method and its limits in the report.
+    Each point is compared with the mean and standard deviation of the `window` points before
+    it (no look-ahead). Returns the flagged rows with columns date, value, expected, z_score.
+    The method and its limits are described in reports/anomalies.py.
     """
-    raise NotImplementedError
+    return rolling_zscore(series, window=window, z_threshold=z_threshold)
 
 
 def build_report(week_end: date) -> WeeklyReport:
