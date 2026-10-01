@@ -23,6 +23,30 @@ a script downloads it and builds a local SQLite database.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for interfaces and data flow and
 [docs/DECISIONS.md](docs/DECISIONS.md) for the design decisions.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    user(["Business user"]) --> dashboard["dashboard/<br/>Streamlit app"]
+    user --> cli["agent/cli.py"]
+    dashboard -->|question| agent["agent/<br/>NL-to-SQL agent"]
+    cli --> agent
+    agent -->|"schema + dataset profile + question"| llm[("LLM provider API")]
+    agent -->|"read-only SQL"| shared["shared/<br/>run_query, schema, charts"]
+    shared --> db[("SQLite database<br/>Olist demo")]
+    reports["reports/ + modeling/<br/>weekly report, forecast"] --> shared
+    reports -->|"summary from computed facts"| llm
+    dashboard -->|"generate_report"| reports
+    evaluation["evaluation/<br/>held-out questions, runner"] -->|"ask(question)"| agent
+    evaluation -->|"gold SQL"| shared
+    dashboard -->|"results files"| evaluation
+    data["data/build_db.py"] -->|builds| db
+```
+
+Modules talk only through `shared/`, the database and the public entry points listed in
+docs/ARCHITECTURE.md. Every query from the agent passes three independent read-only checks
+before it reaches the database (see [Safety](#safety)).
+
 ## Quick start
 
 ```bash
@@ -57,6 +81,68 @@ result = SQLAgent().ask("Which 5 categories had the highest revenue?")
 result.sql, result.data, result.chart, result.explanation
 ```
 
+## Dashboard
+
+```bash
+streamlit run dashboard/app.py
+```
+
+| Page | What it shows |
+|---|---|
+| Chat | Ask a question about the current database: explanation, the SQL that was run, the result table and a chart. Clarifying questions and follow-ups use the conversation history. |
+| Reports | Generate the weekly report for a chosen week (HTML, optional PDF), preview it and download it. Uses the Olist demo database. |
+| Evaluation | Accuracy by category and difficulty, failure types, a per-question table with the reference and generated SQL, and a side-by-side comparison of evaluation runs. |
+| Usage | Simple statistics of the questions asked in the chat (kept in a local log that is not committed). |
+
+Pages live in `dashboard/views/`, one file per page; a new file there adds a page to the menu.
+The database the chat page queries is chosen in one place (`dashboard/context.py`), so the
+same page will work for uploaded data.
+
+## Weekly report and forecast
+
+```bash
+python -m reports.export --week-end 2018-08-19 --pdf
+```
+
+The report covers revenue, orders, average order value, new customers, review score and
+on-time delivery for one week compared with the week before, plus charts, anomalies and a
+4-week revenue forecast. The summary text is written by the LLM from the computed numbers only,
+and every number in it is checked. Details and sample output:
+[docs/REPORTS_AND_MODELING.md](docs/REPORTS_AND_MODELING.md).
+
+## Evaluation
+
+```bash
+python -m evaluation.run_eval            # ask all 27 questions, save results to evaluation/results/
+python -m evaluation.verify_questions    # re-check the reference answers against the database
+```
+
+27 held-out business questions (filters, aggregations, joins, time, rankings, ambiguous
+questions and requests to change data), each with a reference query verified by a second,
+independently written query. A prediction is scored by the data it returns, not by its SQL text.
+
+Results (2 October 2026, 27 questions, Olist database):
+
+| Setup | Accuracy | Notes |
+|---|---|---|
+| gemini-3.1-flash-lite, Olist profile (3 runs) | **96%** in each run (26/27) | the same question failed in all three runs |
+| gemini-3.1-flash-lite, without business rules | 93% (25/27) | |
+| openai/gpt-oss-120b (Groq), Olist profile | 85% (23/27) | one failure has the right numbers with different row labels |
+
+Every request to change data was refused in every run.
+
+Method, failure analysis and limitations: [docs/EVALUATION.md](docs/EVALUATION.md).
+
+## Screenshots
+
+Screenshots of the dashboard will be added to `docs/images/`:
+
+| File | Content |
+|---|---|
+| `docs/images/chat.png` | Chat page with an answer, the SQL and a chart |
+| `docs/images/evaluation.png` | Evaluation page with accuracy by category and failure analysis |
+| `docs/images/reports.png` | Reports page with a weekly report preview |
+
 ## Tests and lint
 
 ```bash
@@ -70,6 +156,17 @@ The tests use a small fixture database and a scripted LLM, so they need no API k
 
 All SQL runs through `shared.db.run_query`, which accepts only a single `SELECT`/`WITH` statement,
 opens the database read-only and uses an SQLite authorizer that denies anything except reads.
+
+## Documentation
+
+| Document | Content |
+|---|---|
+| [docs/CASE_STUDY.md](docs/CASE_STUDY.md) | Business question, method, findings and recommendations |
+| [docs/EVALUATION.md](docs/EVALUATION.md) | How the agent is evaluated and the results |
+| [docs/REPORTS_AND_MODELING.md](docs/REPORTS_AND_MODELING.md) | Weekly report and revenue forecast |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Modules, interfaces and data flow |
+| [docs/SCHEMA.md](docs/SCHEMA.md) | Database schema, cleaning steps and data limitations |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Design decisions and the reasons for them |
 
 ## Contributing
 
