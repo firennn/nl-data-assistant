@@ -20,3 +20,13 @@ Short log of design decisions. Newest last.
 | 2026-10-01 | Store timestamps as ISO text | SQLite has no datetime type; ISO text sorts correctly and works with `date()`, `strftime()` and `julianday()`. |
 | 2026-10-01 | Build into a temporary file and replace the database only after all checks pass | A failed or interrupted build never leaves a broken database behind. |
 | 2026-10-01 | Leave out sample values for id columns in the schema text | Hash ids carry no meaning for SQL generation and cost tokens on every request. |
+| 2026-10-02 | Agent replies in JSON with an explicit action (`sql` or `clarify`) | The agent can tell answers from follow-up questions without guessing from free text, and malformed replies can be detected and retried. |
+| 2026-10-02 | Ask a clarifying question only when readings differ a lot; otherwise state the assumption | Too many questions make the assistant tiring to use; stated assumptions keep answers transparent. |
+| 2026-10-02 | Retry failed SQL with the database error message, at most 2 extra attempts | Most generation errors (wrong column, syntax) are fixed once the model sees the error; a cap bounds cost and latency. |
+| 2026-10-02 | Never retry unsafe SQL | A request to change data must not be rephrased until it slips through; the user gets a clear refusal instead. |
+| 2026-10-02 | Rule-based chart selection instead of asking the LLM | Deterministic, testable and free; the rules cover the common result shapes. |
+| 2026-10-02 | Business rules (revenue, distinct customers, data date range) in the system prompt | Keeps answers consistent with the definitions used by the reports and evaluation. |
+| 2026-10-02 | Separate LLM call for the explanation, with a plain summary as fallback | The explanation is based on the actual result rows, and a failed explanation never loses a correct answer. |
+| 2026-10-02 | Retry temporary LLM errors inside the provider (server busy, per-minute limits), but fail fast on a used-up daily quota | Busy spells are short and a retry usually succeeds; waiting on a daily quota only wastes time, so the fallback or another model is used instead. |
+| 2026-10-02 | Default model `gemini-3.1-flash-lite` instead of the larger Flash model | In testing, the larger model's free tier allowed only 20 requests per day (about 10 questions) and was often overloaded; Flash-Lite answered the test questions correctly with a larger free quota. |
+| 2026-10-02 | Reserve extra output tokens for the model's internal reasoning | Newer models count reasoning tokens toward the output limit; without headroom short replies could come back empty. |
