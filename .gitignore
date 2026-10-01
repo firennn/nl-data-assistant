@@ -27,6 +27,7 @@ modeling/artifacts/
 # Report outputs
 reports/output/
 evaluation/results/
+dashboard/usage_log.jsonl
 
 # Editors / OS
 .vscode/
