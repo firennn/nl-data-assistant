@@ -17,6 +17,8 @@ requirements.txt and its variables in .env.example.
 from __future__ import annotations
 
 import logging
+import re
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol
@@ -40,6 +42,11 @@ class LLMTransientError(LLMError):
 
 class LLMRateLimitError(LLMTransientError):
     """The provider rejected the request because of rate or quota limits."""
+
+
+class LLMQuotaExceededError(LLMRateLimitError):
+    """A daily quota is used up. Waiting a few seconds will not help; a fallback provider or
+    another model (with its own quota) can."""
 
 
 @dataclass(frozen=True)
@@ -66,17 +73,62 @@ class LLMProvider(Protocol):
         ...
 
 
+_RETRY_DELAY_RE = re.compile(r"retryDelay'?\"?\s*:\s*'?\"?(\d+(?:\.\d+)?)s")
+
+
+def _retry_delay_seconds(error_text: str) -> float | None:
+    """Wait time suggested by the provider in a rate-limit error, if any."""
+    match = _RETRY_DELAY_RE.search(error_text)
+    return float(match.group(1)) if match else None
+
+
 class GeminiProvider:
     name = "gemini"
-    default_model = "gemini-3.8-flash"
+    default_model = "gemini-3.1-flash-lite"
+    # Newer models "think" before answering and thinking counts toward max_output_tokens.
+    # This headroom keeps max_tokens meaning roughly "tokens of visible answer".
+    thinking_headroom = 4096
+    server_error_backoff = (2.0, 6.0)  # seconds before retry 1, 2, ...
+    max_rate_limit_wait = 60.0
 
-    def __init__(self, api_key: str | None, model: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None,
+        model: str | None = None,
+        *,
+        max_retries: int = 2,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         if not api_key:
             raise LLMConfigError("Gemini API key is missing (set LLM_API_KEY).")
         from google import genai
 
         self.model = model or self.default_model
         self._client = genai.Client(api_key=api_key)
+        self._max_retries = max_retries
+        self._sleep = sleep
+
+    def _classify(self, exc: Exception) -> tuple[LLMError, float | None]:
+        """Map an SDK error to our error type and the wait before a retry (None = don't retry)."""
+        text = str(exc)
+        code = getattr(exc, "code", None) or 0
+        if code == 429:
+            if "PerDay" in text:
+                return (
+                    LLMQuotaExceededError(
+                        f"Daily free quota for {self.model} is used up. It resets daily; "
+                        f"set another model in LLM_MODEL (each model has its own quota) or "
+                        f"configure a fallback provider. Details: {text[:300]}"
+                    ),
+                    None,
+                )
+            delay = _retry_delay_seconds(text) or 10.0
+            return LLMRateLimitError(f"Gemini rate limit: {text}"), min(
+                delay + 1.0, self.max_rate_limit_wait
+            )
+        if code >= 500:
+            return LLMTransientError(f"Gemini server error: {text}"), 0.0
+        return LLMError(f"Gemini request failed: {text}"), None
 
     def complete(
         self,
@@ -87,31 +139,42 @@ class GeminiProvider:
         max_tokens: int = 2048,
         json_mode: bool = False,
     ) -> LLMResponse:
+        """Call the model, retrying temporary failures (server busy, per-minute limits)."""
         from google.genai import errors, types
 
         config = types.GenerateContentConfig(
             system_instruction=system,
             temperature=temperature,
-            max_output_tokens=max_tokens,
+            max_output_tokens=max_tokens + self.thinking_headroom,
             response_mime_type="application/json" if json_mode else None,
+            # No tools are passed, so function calling is not needed.
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
-        try:
-            response = self._client.models.generate_content(
-                model=self.model, contents=prompt, config=config
-            )
-        except errors.APIError as exc:
-            code = getattr(exc, "code", None) or 0
-            if code == 429:
-                raise LLMRateLimitError(f"Gemini rate limit: {exc}") from exc
-            if code >= 500:
-                raise LLMTransientError(f"Gemini server error: {exc}") from exc
-            raise LLMError(f"Gemini request failed: {exc}") from exc
-        except OSError as exc:
-            raise LLMTransientError(f"Gemini network error: {exc}") from exc
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = self._client.models.generate_content(
+                    model=self.model, contents=prompt, config=config
+                )
+                break
+            except errors.APIError as exc:
+                error, wait = self._classify(exc)
+            except OSError as exc:
+                error, wait = LLMTransientError(f"Gemini network error: {exc}"), 0.0
+            if wait is None or attempt == self._max_retries:
+                raise error
+            if wait == 0.0:
+                backoff = self.server_error_backoff
+                wait = backoff[min(attempt, len(backoff) - 1)]
+            logger.warning("%s; retrying in %.0fs", str(error)[:120], wait)
+            self._sleep(wait)
 
         text = response.text or ""
         if not text.strip():
-            raise LLMError("Gemini returned an empty response.")
+            reason = ""
+            candidates = getattr(response, "candidates", None) or []
+            if candidates and getattr(candidates[0], "finish_reason", None) is not None:
+                reason = f" (finish reason: {candidates[0].finish_reason})"
+            raise LLMError(f"Gemini returned an empty response{reason}.")
         return LLMResponse(text=text, provider=self.name, model=self.model)
 
 
