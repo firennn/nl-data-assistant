@@ -1,12 +1,13 @@
 """Weekly report builder (owner: owner2).
 
-Uses only shared/ (run_query, MetricResult, ChartSpec, get_llm) and modeling.forecast's
-public function. The Olist data ends in 2018, so every function takes an explicit
-`week_end` date instead of using today's date.
+Uses only shared/ (run_query, MetricResult, ChartSpec, get_llm) and the revenue forecast in
+modeling/. The Olist data ends in 2018, so every function takes an explicit `week_end` date
+instead of using today's date.
 """
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -14,10 +15,23 @@ from pathlib import Path
 
 import pandas as pd
 
-from reports.anomalies import rolling_zscore
-from reports.charts import ReportChart
+from modeling.forecast import forecast_weekly_revenue
+from modeling.train import load_weekly_revenue
+from reports.anomalies import (
+    AnomalyConfig,
+    find_daily_anomalies,
+    flag_metric_changes,
+    rolling_zscore,
+)
+from reports.charts import ReportChart, build_charts
 from reports.metrics import METRICS
+from reports.summary import build_facts, write_summary
+from shared.llm import LLMProvider
 from shared.models import MetricResult
+
+logger = logging.getLogger(__name__)
+
+FORECAST_WEEKS = 4
 
 __all__ = [
     "ReportChart",
@@ -34,10 +48,13 @@ class WeeklyReport:
     week_start: date
     week_end: date
     metrics: list[MetricResult]
-    anomalies: pd.DataFrame  # columns: date, metric, value, expected, z_score
+    anomalies: pd.DataFrame  # columns: date, metric, value, expected, z_score, method
     charts: list[ReportChart] = field(default_factory=list)
     forecast: pd.DataFrame | None = None  # see modeling.forecast.forecast_weekly_revenue
     summary: str = ""  # executive summary in plain language
+    metric_changes: pd.DataFrame | None = None  # week-over-week changes above the threshold
+    summary_source: str = ""  # "llm", or "fallback" if the plain summary was used
+    facts: str = ""  # the computed facts the summary is based on
 
 
 def week_bounds(week_end: date) -> tuple[date, date]:
@@ -85,15 +102,64 @@ def detect_anomalies(
     return rolling_zscore(series, window=window, z_threshold=z_threshold)
 
 
-def build_report(week_end: date) -> WeeklyReport:
+def build_report(
+    week_end: date,
+    *,
+    db_path: str | Path | None = None,
+    llm: LLMProvider | None = None,
+    config: AnomalyConfig | None = None,
+) -> WeeklyReport:
     """Assemble the full report for the week ending on `week_end`.
 
-    TODO(owner2):
-    - Call compute_weekly_metrics, detect_anomalies on daily revenue and orders,
-      and modeling.forecast.forecast_weekly_revenue for the next 4 weeks.
-    - Add charts as ReportChart(ChartSpec, DataFrame): 12-week revenue trend (line),
-      top categories (bar), orders by state (bar).
-    - Write the executive summary with shared.llm.get_llm(), passing only computed numbers
-      (never raw rows) and asking for 4-6 plain sentences.
+    Metrics, anomalies, charts and the forecast are computed first; the executive summary is
+    then written from those numbers only (see reports/summary.py). `llm` defaults to
+    shared.llm.get_llm(); if it fails, the report still has a plain summary.
     """
-    raise NotImplementedError
+    config = config or AnomalyConfig()
+    week_start, week_end = week_bounds(week_end)
+    metrics = compute_weekly_metrics(week_end, db_path=db_path)
+    anomalies = find_daily_anomalies(week_end, config=config, db_path=db_path)
+    changes = flag_metric_changes(metrics, threshold_pct=config.change_threshold_pct)
+    charts = build_charts(week_end, db_path=db_path)
+    forecast = _forecast(week_end, db_path)
+    facts = build_facts(
+        metrics=metrics,
+        metric_changes=changes,
+        anomalies=anomalies,
+        top_category=_top_row(charts, "category", "revenue_brl"),
+        top_state=_top_row(charts, "state", "orders"),
+        forecast=forecast,
+    )
+    summary = write_summary(facts, llm)
+    return WeeklyReport(
+        week_start=week_start,
+        week_end=week_end,
+        metrics=metrics,
+        anomalies=anomalies,
+        charts=charts,
+        forecast=forecast,
+        summary=summary.text,
+        metric_changes=changes,
+        summary_source=summary.source,
+        facts=facts,
+    )
+
+
+def _forecast(week_end: date, db_path: str | Path | None) -> pd.DataFrame | None:
+    """Forecast from the weekly history up to the last Sunday on or before `week_end`."""
+    through = week_end - timedelta(days=(week_end.weekday() + 1) % 7)
+    try:
+        history = load_weekly_revenue(through=through, db_path=db_path)
+        return forecast_weekly_revenue(history, horizon_weeks=FORECAST_WEEKS)
+    except ValueError as exc:
+        logger.warning("No forecast for the week ending %s: %s", week_end, exc)
+        return None
+
+
+def _top_row(charts: list[ReportChart], label: str, value: str) -> tuple | None:
+    """(label, value) of the first row of the first chart with those columns, if any."""
+    for chart in charts:
+        if {label, value} <= set(chart.data.columns) and not chart.data.empty:
+            first = chart.data.iloc[0]
+            return first[label], first[value].item()
+    return None

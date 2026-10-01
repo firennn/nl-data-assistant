@@ -24,3 +24,32 @@ def test_compute_weekly_metrics(sample_db):
     assert revenue.comparison_value == 0
     assert revenue.comparison_label == "previous week"
     assert revenue.change_pct is None  # no sales in the previous week
+
+
+def test_build_report_on_the_fixture(sample_db):
+    from shared.llm import FakeProvider
+
+    text = "Revenue was 405.80 BRL from 2 orders, led by sports_leisure at 249.90 BRL."
+    report = weekly_report.build_report(
+        date(2018, 1, 7), db_path=sample_db, llm=FakeProvider([text])
+    )
+    assert (report.week_start, report.week_end) == (date(2018, 1, 1), date(2018, 1, 7))
+    assert [m.name for m in report.metrics][:2] == ["Revenue", "Orders"]
+    assert len(report.charts) == 3
+    assert list(report.anomalies["date"].unique()) == [date(2018, 1, 5)]
+    assert report.metric_changes is not None
+    assert len(report.forecast) == 4
+    assert report.summary == text
+    assert report.summary_source == "llm"
+    assert "Top category by revenue: sports_leisure (249.90 BRL)." in report.facts
+    assert "State with the most orders: RJ (1 orders)." in report.facts
+
+
+def test_build_report_without_a_working_llm_still_has_a_summary(sample_db):
+    from shared.llm import FakeProvider, LLMError
+
+    report = weekly_report.build_report(
+        date(2018, 1, 7), db_path=sample_db, llm=FakeProvider([LLMError("no key")])
+    )
+    assert report.summary_source == "fallback"
+    assert "Revenue: 405.80 BRL" in report.summary
