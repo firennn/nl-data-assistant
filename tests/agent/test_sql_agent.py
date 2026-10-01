@@ -8,6 +8,8 @@ from agent.sql_agent import ReplyFormatError, SQLAgent, parse_reply
 from shared.config import Settings
 from shared.db import run_query
 from shared.llm import FakeProvider, LLMError, LLMRateLimitError
+from shared.models import DatasetProfile
+from shared.profiles import OLIST_PROFILE
 
 
 def sql_reply(sql: str, assumptions: str = "") -> str:
@@ -227,11 +229,58 @@ def test_schema_is_described_once_per_agent(sample_db, monkeypatch):
     import agent.sql_agent as module
 
     real = module.describe_schema
-    monkeypatch.setattr(module, "describe_schema", lambda path: calls.append(path) or real(path))
+    monkeypatch.setattr(
+        module, "describe_schema", lambda path, **kw: calls.append(path) or real(path, **kw)
+    )
     agent, _ = make_agent(sample_db, [sql_reply("SELECT 1 AS x"), "ok"] * 2)
     agent.ask("one")
     agent.ask("two")
     assert len(calls) == 1
+
+
+def test_default_profile_is_olist_with_samples(sample_db):
+    agent, llm = make_agent(sample_db, [sql_reply("SELECT 1 AS x"), "ok"])
+    assert agent.profile is OLIST_PROFILE
+    agent.ask("anything")
+    (prompt, system), (_, explain_system) = llm.calls
+    assert "Olist" in system and "Revenue" in system
+    assert "order_items oi" in prompt  # Olist examples
+    assert "samples:" in prompt
+    assert "excluding canceled and unavailable orders" in explain_system
+
+
+def test_generic_profile_has_no_olist_rules_and_no_samples(sample_db):
+    llm = FakeProvider([sql_reply("SELECT 1 AS x"), "ok"])
+    profile = DatasetProfile(name="Uploaded file")
+    agent = SQLAgent(llm=llm, settings=Settings(db_path=sample_db), profile=profile)
+    agent.ask("anything")
+    (prompt, system), (_, explain_system) = llm.calls
+    assert "TABLE orders" in prompt  # the schema is still there
+    assert "samples:" not in prompt
+    assert 'made-up table "sales"' in prompt
+    for text in (system, explain_system):
+        assert "Olist" not in text and "R$" not in text and "2018" not in text
+    assert "relative to the latest date" in system
+
+
+def test_samples_are_not_read_when_the_profile_excludes_them(sample_db, monkeypatch):
+    import agent.sql_agent as module
+
+    seen = {}
+    real = module.describe_schema
+
+    def spy(path, **kw):
+        seen.update(kw)
+        return real(path, **kw)
+
+    monkeypatch.setattr(module, "describe_schema", spy)
+    agent = SQLAgent(
+        llm=FakeProvider([]),
+        settings=Settings(db_path=sample_db),
+        profile=DatasetProfile(name="x"),
+    )
+    agent.schema_text()
+    assert seen["sample_values"] == 0
 
 
 def test_parse_reply_refuse():
