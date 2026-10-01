@@ -135,13 +135,21 @@ Method, failure analysis and limitations: [docs/EVALUATION.md](docs/EVALUATION.m
 
 ## Screenshots
 
-Screenshots of the dashboard will be added to `docs/images/`:
+**Chat:** a question in plain language, the explanation, the SQL that was run (click
+"SQL used" to expand it), a chart and the result table.
 
-| File | Content |
-|---|---|
-| `docs/images/chat.png` | Chat page with an answer, the SQL and a chart |
-| `docs/images/evaluation.png` | Evaluation page with accuracy by category and failure analysis |
-| `docs/images/reports.png` | Reports page with a weekly report preview |
+![Chat page](docs/images/chat.png)
+
+**Evaluation:** accuracy of one evaluation run by category and difficulty; the page also shows
+the failure analysis, every question with the reference and generated SQL, and a comparison of
+runs.
+
+![Evaluation page](docs/images/evaluation.png)
+
+**Reports:** a generated weekly report with its summary and key metrics, ready to download as
+HTML, PDF or JSON.
+
+![Reports page](docs/images/reports.png)
 
 ## Tests and lint
 
