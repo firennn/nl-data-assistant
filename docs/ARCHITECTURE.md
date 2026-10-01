@@ -51,6 +51,9 @@ Behavior of `ask`:
   `AGENT_MAX_RETRIES` extra attempts (default 2). `attempts` in the result counts the tries.
 - Unsafe SQL is never run and never retried; the result has an error message.
 - LLM failures (rate limit, no key) are returned as `error`, never raised.
+- A missing database, a file that is not a SQLite database, or a schema that takes too long to
+  read is returned as `error` without calling the LLM. The schema text in the prompt is kept
+  within `SCHEMA_MAX_CHARS` (12,000 characters).
 - Chart rules: empty/no numbers -> table; 1x1 number -> metric; period column + number -> line;
   one category + one number (<= 20 rows) -> bar; two numbers -> scatter; otherwise table.
 - The explanation is 2-4 sentences from a second LLM call; if that call fails, a short summary
@@ -67,7 +70,7 @@ Behavior of `ask`:
 |---|---|
 | `config.py` | `get_settings(env_file=None) -> Settings` with `db_path`, `llm_provider`, `llm_model`, `llm_api_key`, `llm_fallback_provider`, `llm_fallback_model`, `llm_fallback_api_key`, `agent_max_retries` |
 | `db.py` | `run_query(sql, params=None, *, db_path=None, max_rows=10_000, timeout_s=10) -> DataFrame`; `validate_read_only(sql) -> str`; errors `UnsafeQueryError`, `QueryError`, `QueryTimeoutError`; `connect_read_only(db_path=None)` for trusted internal SQL only |
-| `schema.py` | `describe_schema(db_path=None, *, sample_values=3, tables=None) -> SchemaInfo`; `schema_to_prompt(schema, *, include_samples=True) -> str` |
+| `schema.py` | `describe_schema(db_path=None, *, sample_values=3, tables=None, timeout_s=10.0) -> SchemaInfo` (raises `QueryTimeoutError` past the time limit, `QueryError` for a file that is not a readable SQLite database); `schema_to_prompt(schema, *, include_samples=True, max_chars=None) -> str`; limits as constants: `DESCRIBE_TIMEOUT_S`, `SCHEMA_MAX_CHARS`, `SCHEMA_COLUMN_CAPS`, `SCHEMA_OMITTED_TABLE_NAMES` |
 | `models.py` | `ChartSpec`, `QueryResult`, `MetricResult`, `DatasetProfile` (see below) |
 | `profiles.py` | `OLIST_PROFILE`: business rules, currency, date range and examples for the demo database |
 | `llm.py` | `get_llm(settings=None) -> LLMProvider`; `LLMProvider.complete(prompt, *, system=None, temperature=0.0, max_tokens=2048, json_mode=False) -> LLMResponse`; `register_provider(name, factory)`; errors `LLMError`, `LLMConfigError`, `LLMTransientError`, `LLMRateLimitError`, `LLMQuotaExceededError`; `FakeProvider` for tests |
@@ -81,6 +84,17 @@ Behavior of `ask`:
 3. An SQLite authorizer allows only read, select, function and recursive-CTE actions.
 
 It also caps rows (`df.attrs["truncated"]`) and stops queries that exceed the time limit.
+
+Every connection (`connect_read_only`, used by `run_query` and schema inspection) also sets
+`PRAGMA trusted_schema = OFF`, so views, triggers and defaults stored in a database file (for
+example an uploaded one) cannot call functions with side effects.
+
+### Schema text size limit
+When `max_chars` is set and the full schema text is longer, `schema_to_prompt` shortens it in
+this order until it fits: leave out sample values, then descriptions, then keep only key
+columns plus the first 30, 20 or 10 columns per table, then leave out tables at the end (the
+first 20 left-out names are listed), and as a last resort cut the text. A line always says what
+was left out. A schema that fits is returned unchanged.
 
 ### Data models
 

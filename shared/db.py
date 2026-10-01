@@ -6,6 +6,9 @@ Safety is layered so that a bug in one layer does not allow writes:
 1. validate_read_only() rejects anything other than a single SELECT/WITH statement.
 2. The connection is opened with mode=ro and PRAGMA query_only=ON.
 3. An SQLite authorizer denies every action except reads and function calls.
+
+Connections also set PRAGMA trusted_schema=OFF, so views, triggers and defaults stored in a
+database file (e.g. an uploaded one) cannot call functions with side effects.
 """
 
 from __future__ import annotations
@@ -105,7 +108,9 @@ def _authorizer(action: int, *_args: object) -> int:
 
 
 def connect_read_only(db_path: str | Path | None = None) -> sqlite3.Connection:
-    """Open the database read-only (mode=ro + query_only). Raises FileNotFoundError if missing.
+    """Open the database read-only (mode=ro + query_only, trusted_schema off).
+
+    Raises FileNotFoundError if missing.
 
     Used directly only for trusted internal SQL (e.g. schema inspection).
     Anything built from user or model input must go through run_query().
@@ -117,6 +122,7 @@ def connect_read_only(db_path: str | Path | None = None) -> sqlite3.Connection:
         )
     conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
     conn.execute("PRAGMA query_only = ON")
+    conn.execute("PRAGMA trusted_schema = OFF")
     return conn
 
 
