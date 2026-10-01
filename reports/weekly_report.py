@@ -7,11 +7,14 @@ public function. The Olist data ends in 2018, so every function takes an explici
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
+from pathlib import Path
 
 import pandas as pd
 
+from reports.metrics import METRICS
 from shared.models import ChartSpec, MetricResult
 
 
@@ -33,18 +36,37 @@ class WeeklyReport:
     summary: str = ""  # executive summary in plain language
 
 
-def compute_weekly_metrics(week_end: date) -> list[MetricResult]:
+def week_bounds(week_end: date) -> tuple[date, date]:
+    """Return (week_start, week_end) for the 7 days ending on `week_end`, both inclusive."""
+    return week_end - timedelta(days=6), week_end
+
+
+def compute_weekly_metrics(
+    week_end: date, *, db_path: str | Path | None = None
+) -> list[MetricResult]:
     """Return the key metrics for the 7 days ending on `week_end`, compared with the week before.
 
-    TODO(owner2):
-    - Metrics: revenue (see docs/DECISIONS.md: sum of order_items.price, excluding canceled
-      and unavailable orders), number of orders,
-      average order value, new customers (first order by customer_unique_id), average review
-      score, on-time delivery rate (delivered_customer_ts <= estimated_delivery_date).
-    - Use shared.db.run_query with parameters (?), never string formatting.
-    - Fill comparison_value / comparison_label="previous week"; units "BRL", "orders", "%".
+    Metrics come from the registry in reports/metrics.py, in registration order. A value is
+    NaN when the week has nothing to measure; the comparison is then None.
     """
-    raise NotImplementedError
+    week_start, week_end = week_bounds(week_end)
+    prev_start, prev_end = week_bounds(week_start - timedelta(days=1))
+    results = []
+    for metric in METRICS.values():
+        value = metric.compute(week_start, week_end, db_path)
+        previous = metric.compute(prev_start, prev_end, db_path)
+        results.append(
+            MetricResult(
+                name=metric.name,
+                value=value,
+                period_start=week_start,
+                period_end=week_end,
+                comparison_value=None if math.isnan(previous) else previous,
+                comparison_label="previous week",
+                unit=metric.unit,
+            )
+        )
+    return results
 
 
 def detect_anomalies(
