@@ -139,6 +139,22 @@ SQLite file at `DB_PATH` (default `data/olist.db`), built by `python -m data.bui
 `order_payments`, `order_reviews`, `geolocation`, plus the internal `_schema_docs`
 (descriptions used in prompts). Full schema: `docs/SCHEMA.md`.
 
+## dashboard/ (owner3)
+
+| Module | Purpose |
+|---|---|
+| `app.py` | Entry point (`streamlit run dashboard/app.py`): sidebar with the database picker and the page menu |
+| `context.py` | `AppContext`: the current `DataSource` (name, `db_path`, `DatasetProfile`, kind `demo` or `upload`), the Olist demo source, and file locations. The only place that decides which database the chat page queries |
+| `views/` | One file per page, each defining `VIEW = View(key, title, render, order, icon, olist_only)`; found automatically |
+| `usage.py` | Local usage log (`dashboard/usage_log.jsonl`, not committed) |
+
+- Pages call only public entry points: `SQLAgent(db_path=..., profile=...).ask`,
+  `reports.export.generate_report`, and the evaluation results files read with
+  `evaluation.run_eval.load_results` and summarized by `evaluation.metrics`.
+- `olist_only` pages (Reports, Evaluation) always use the Olist demo source. An uploaded
+  database becomes another `DataSource` via `dashboard.context.add_source`; the chat page then
+  queries it with its own profile.
+
 ## Public entry points
 
 | Module | Entry point | Used by |
