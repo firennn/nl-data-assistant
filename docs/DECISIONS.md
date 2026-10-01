@@ -39,3 +39,7 @@ Short log of design decisions. Newest last.
 | 2026-10-01 | Days whose baseline has zero spread are not flagged | Avoids division by zero and infinite scores at the start of the data; this limit is documented in `reports/anomalies.py`. |
 | 2026-10-01 | Week-over-week changes of 20% or more are flagged separately from daily anomalies | A slow drift across a week does not show up as a daily spike, but managers still want to see large weekly moves. |
 | 2026-10-01 | Anomaly thresholds live in one `AnomalyConfig`, and daily series and detectors in registries in `reports/anomalies.py` | Thresholds can be tuned in one place, and adding a series or detector is a one-function change. |
+| 2026-10-01 | Report charts are a registry in `reports/charts.py` that returns a `ChartSpec` plus data, rendered only by `shared.charts.render_chart` | Adding a chart is a one-function change, and the HTML report and dashboard draw charts the same way. |
+| 2026-10-01 | The revenue trend reuses the Revenue metric for each week | The last point of the chart always matches the revenue number in the KPI table. |
+| 2026-10-01 | Category and state charts show the top 10 for the report week, ties sorted by name | Keeps bar charts readable (there are 27 states and over 70 categories) and the order deterministic. |
+| 2026-10-01 | `ReportChart` moved to `reports/charts.py` and is imported into `reports/weekly_report.py` | Avoids a circular import between the chart and report modules; `weekly_report.ReportChart` still works. |

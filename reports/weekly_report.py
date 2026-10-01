@@ -15,15 +15,18 @@ from pathlib import Path
 import pandas as pd
 
 from reports.anomalies import rolling_zscore
+from reports.charts import ReportChart
 from reports.metrics import METRICS
-from shared.models import ChartSpec, MetricResult
+from shared.models import MetricResult
 
-
-@dataclass
-class ReportChart:
-    title: str
-    spec: ChartSpec
-    data: pd.DataFrame
+__all__ = [
+    "ReportChart",
+    "WeeklyReport",
+    "build_report",
+    "compute_weekly_metrics",
+    "detect_anomalies",
+    "week_bounds",
+]
 
 
 @dataclass
