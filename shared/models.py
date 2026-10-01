@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
 
@@ -65,3 +65,25 @@ class MetricResult:
         if self.comparison_value is None or self.comparison_value == 0:
             return None
         return (self.value - self.comparison_value) / abs(self.comparison_value) * 100
+
+
+@dataclass
+class DatasetProfile:
+    """What the agent knows about a database beyond its schema.
+
+    The agent prompts are generic; a profile adds the dataset's description, business rules,
+    currency and date range. Without a date range, relative periods ("last month") are taken
+    relative to the latest date in the data.
+    """
+
+    name: str
+    description: str = ""  # e.g. "an e-commerce marketplace (Olist, Brazil)"
+    rules: list[str] = field(default_factory=list)  # business rules, one per prompt line
+    currency: str | None = None  # e.g. "Brazilian reais (BRL)"; None leaves money unspecified
+    currency_format: str | None = None  # how explanations write amounts, e.g. "R$ 1,234.56"
+    date_range: tuple[str, str] | None = None  # ("YYYY-MM-DD", "YYYY-MM-DD"), complete data
+    examples: str = ""  # dataset-specific question -> reply examples; empty uses generic ones
+    # How explanations should (and should not) describe a filter, e.g.
+    # '"excluding canceled orders", not "completed orders"'; None uses a generic example.
+    filter_example: str | None = None
+    include_samples: bool = False  # sample values in the schema text are sent to the LLM

@@ -7,11 +7,12 @@ See docs/ARCHITECTURE.md.
 from shared.config import Settings, get_settings
 from shared.db import QueryError, QueryTimeoutError, UnsafeQueryError, run_query, validate_read_only
 from shared.llm import LLMError, LLMProvider, LLMResponse, get_llm
-from shared.models import ChartSpec, MetricResult, QueryResult
+from shared.models import ChartSpec, DatasetProfile, MetricResult, QueryResult
 from shared.schema import SchemaInfo, describe_schema, schema_to_prompt
 
 __all__ = [
     "ChartSpec",
+    "DatasetProfile",
     "LLMError",
     "LLMProvider",
     "LLMResponse",
