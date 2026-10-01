@@ -31,6 +31,31 @@ question -> describe_schema + schema_to_prompt -> LLM -> {"action": "sql" | "cla
          -> choose chart (rules) -> LLM explanation -> QueryResult
 ```
 
+## agent/ (owner1)
+
+| Module | Purpose |
+|---|---|
+| `sql_agent.py` | `SQLAgent.ask(question, history=None) -> QueryResult` — the only entry point other modules use |
+| `prompts.py` | System prompts, examples and prompt builders for SQL generation and explanations |
+| `chart_selector.py` | `choose_chart(df, title="") -> ChartSpec`, deterministic rules |
+| `cli.py` | `python -m agent.cli "question"` or interactive mode; `--chart out.html` saves the chart |
+
+Behavior of `ask`:
+- The LLM replies with JSON: `{"action": "sql", "sql": ..., "assumptions": ...}`,
+  `{"action": "clarify", "question": ...}` or `{"action": "refuse", "reason": ...}` (requests to
+  change data or unrelated questions). A clarifying question is only accepted on the first
+  attempt and is returned as `needs_clarification=True`; a refusal is returned as `error`.
+- Pass the conversation as `history=[("user", ...), ("assistant", ...)]` so a reply to a
+  clarifying question or a follow-up ("now by month") is understood.
+- SQL errors, timeouts and malformed replies are retried with the error message, up to
+  `AGENT_MAX_RETRIES` extra attempts (default 2). `attempts` in the result counts the tries.
+- Unsafe SQL is never run and never retried; the result has an error message.
+- LLM failures (rate limit, no key) are returned as `error`, never raised.
+- Chart rules: empty/no numbers -> table; 1x1 number -> metric; period column + number -> line;
+  one category + one number (<= 20 rows) -> bar; two numbers -> scatter; otherwise table.
+- The explanation is 2-4 sentences from a second LLM call; if that call fails, a short summary
+  is used so the answer is still returned.
+
 ## shared/ (owner1)
 
 | Module | Interface |
@@ -39,7 +64,7 @@ question -> describe_schema + schema_to_prompt -> LLM -> {"action": "sql" | "cla
 | `db.py` | `run_query(sql, params=None, *, db_path=None, max_rows=10_000, timeout_s=10) -> DataFrame`; `validate_read_only(sql) -> str`; errors `UnsafeQueryError`, `QueryError`, `QueryTimeoutError`; `connect_read_only(db_path=None)` for trusted internal SQL only |
 | `schema.py` | `describe_schema(db_path=None, *, sample_values=3, tables=None) -> SchemaInfo`; `schema_to_prompt(schema, *, include_samples=True) -> str` |
 | `models.py` | `ChartSpec`, `QueryResult`, `MetricResult` (see below) |
-| `llm.py` | `get_llm(settings=None) -> LLMProvider`; `LLMProvider.complete(prompt, *, system=None, temperature=0.0, max_tokens=2048, json_mode=False) -> LLMResponse`; `register_provider(name, factory)`; errors `LLMError`, `LLMConfigError`, `LLMTransientError`, `LLMRateLimitError`; `FakeProvider` for tests |
+| `llm.py` | `get_llm(settings=None) -> LLMProvider`; `LLMProvider.complete(prompt, *, system=None, temperature=0.0, max_tokens=2048, json_mode=False) -> LLMResponse`; `register_provider(name, factory)`; errors `LLMError`, `LLMConfigError`, `LLMTransientError`, `LLMRateLimitError`, `LLMQuotaExceededError`; `FakeProvider` for tests |
 | `charts.py` | `render_chart(df, spec) -> plotly.graph_objects.Figure` |
 
 ### Read-only guarantee
@@ -71,6 +96,11 @@ provider when the primary fails with a transient error (rate limit, server or ne
 Providers are plain classes registered in `shared/llm.py`; adding one (for example a locally
 hosted fine-tuned model) does not change any caller.
 
+The Gemini provider retries temporary failures itself: "server busy" (5xx) after 2 s and 6 s,
+and per-minute rate limits after the wait the API suggests. A used-up **daily** quota raises
+`LLMQuotaExceededError` immediately (a subclass of `LLMRateLimitError`, so the fallback provider
+still takes over). Free-tier quotas are per model, so switching `LLM_MODEL` also works.
+
 ## Database (owner1)
 SQLite file at `DB_PATH` (default `data/olist.db`), built by `python -m data.build_db` from
 `data/schema.sql`. Tables: `customers`, `sellers`, `products`, `orders`, `order_items`,
@@ -81,7 +111,7 @@ SQLite file at `DB_PATH` (default `data/olist.db`), built by `python -m data.bui
 
 | Module | Entry point | Used by |
 |---|---|---|
-| agent (owner1) | `agent.SQLAgent(llm=None, settings=None).ask(question, history=None) -> QueryResult` | dashboard, evaluation |
+| agent (owner1) | `agent.SQLAgent(llm=None, settings=None, *, db_path=None, max_rows=1000).ask(question, history=None) -> QueryResult` | dashboard, evaluation |
 | reports (owner2) | `reports.weekly_report.build_report(week_end) -> WeeklyReport`; `reports.export.export_html / export_pdf / run_weekly` | dashboard, scheduler |
 | modeling (owner2) | `modeling.forecast.forecast_weekly_revenue(history, horizon_weeks=4) -> DataFrame[week, forecast, lower, upper]` | reports |
 | evaluation (owner3) | `evaluation.run_eval.run_evaluation(ask, cases) -> EvalReport`; `load_questions()`; results files in `evaluation/results/` | dashboard |
