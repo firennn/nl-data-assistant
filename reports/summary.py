@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from reports.anomalies import AnomalyConfig
 from shared.llm import LLMError, LLMProvider, get_llm
 from shared.models import MetricResult
 
@@ -81,7 +82,10 @@ def build_facts(
         moved = ", ".join(f"{r.metric} {r.change_pct:+.1f}%" for r in metric_changes.itertuples())
         lines.append(f"Large week-over-week changes: {moved}.")
     else:
-        lines.append("No metric changed by 20% or more compared with the previous week.")
+        threshold = AnomalyConfig().change_threshold_pct
+        lines.append(
+            f"No metric changed by {threshold:g}% or more compared with the previous week."
+        )
     if anomalies is not None and not anomalies.empty:
         for r in anomalies.itertuples():
             lines.append(
