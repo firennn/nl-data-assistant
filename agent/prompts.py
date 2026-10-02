@@ -30,6 +30,8 @@ Rules:
 - For rankings or lists add ORDER BY and a LIMIT (default 10 unless the question says otherwise).
 - For trends over time return one row per period, ordered by period.
 - {date_rule}
+- When the question uses a relative period, also return the period it resolves to (e.g. a
+  month column), so the answer can name it.
 
 Ambiguity: ask a clarifying question ONLY if reasonable readings of the question would give very
 different answers and no common business default exists. Otherwise pick the usual meaning and
@@ -60,6 +62,9 @@ Examples (for a question -> reply format; they use a made-up table "sales", your
 Question: How many sales were made in 2023?
 {"action": "sql", "sql": "SELECT COUNT(*) AS sales FROM sales WHERE strftime('%Y', sale_date) = '2023'", "assumptions": "Counts sales of every status."}
 
+Question: How many sales were made last month?
+{"action": "sql", "sql": "WITH latest AS (SELECT MAX(sale_date) AS d FROM sales) SELECT strftime('%Y-%m', s.sale_date) AS month, COUNT(*) AS sales FROM sales s, latest WHERE strftime('%Y-%m', s.sale_date) = strftime('%Y-%m', date(latest.d, 'start of month', '-1 month')) GROUP BY month", "assumptions": "Last month is the month before the latest month in the data; the month is returned so the answer can name it."}
+
 Question: Total amount per month for the last three months
 {"action": "sql", "sql": "WITH latest AS (SELECT MAX(sale_date) AS d FROM sales) SELECT strftime('%Y-%m', s.sale_date) AS month, ROUND(SUM(s.amount), 2) AS total_amount FROM sales s, latest WHERE s.sale_date >= date(latest.d, 'start of month', '-2 months') GROUP BY month ORDER BY month", "assumptions": "The last three months are the three latest months in the data."}
 
@@ -79,6 +84,9 @@ or caveat (e.g. what is excluded{data_end}). Use only numbers that appear
 in the result. Do not describe the SQL itself and do not use markdown headings or bullet lists.
 {money}\
 Describe filters exactly as the SQL applies them (e.g. {filter_example}).
+If the question uses a relative period (e.g. "last month" or "recent"), name the actual period
+the result covers (e.g. "May 2023") when it appears in the result or the SQL. Never guess a
+period that does not appear there; say e.g. "the month before the latest date in the data".
 """
 
 _GENERIC_FILTER_EXAMPLE = '"excluding canceled orders", not "completed orders"'

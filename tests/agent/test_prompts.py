@@ -97,6 +97,21 @@ def test_dollar_format_does_not_forbid_the_dollar_sign():
     assert "never with a plain $ sign" not in explain
 
 
+@pytest.mark.parametrize("profile", [None, OLIST_PROFILE, DatasetProfile(name="x")])
+def test_explanation_names_the_actual_period(profile):
+    explain = build_explain_system(profile)
+    assert 'If the question uses a relative period (e.g. "last month"' in explain
+    assert 'name the actual period\nthe result covers (e.g. "May 2023")' in explain
+    assert "Never guess a\nperiod that does not appear there" in explain
+    # The SQL must return the resolved period, otherwise the explanation cannot see it.
+    assert "also return the period it resolves to" in build_sql_system(profile)
+
+
+def test_generic_examples_show_returning_the_resolved_month():
+    assert "Question: How many sales were made last month?" in EXAMPLES
+    assert "AS month, COUNT(*) AS sales" in EXAMPLES
+
+
 def test_currency_without_format():
     explain = build_explain_system(DatasetProfile(name="x", currency="points"))
     assert "Money is in points.\n" in explain

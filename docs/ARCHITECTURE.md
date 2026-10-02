@@ -58,6 +58,8 @@ Behavior of `ask`:
   one category + one number (<= 20 rows) -> bar; two numbers -> scatter; otherwise table.
 - The explanation is 2-4 sentences from a second LLM call; if that call fails, a short summary
   is used so the answer is still returned.
+- If the question uses a relative period ("last month"), the SQL also returns the period it
+  resolves to and the explanation names it (e.g. "May 2023").
 - The prompts are generic; dataset-specific context comes from the `profile` argument
   (a `DatasetProfile`, default `shared.profiles.OLIST_PROFILE`). Pass a profile for any other
   database, e.g. an uploaded one. Without a date range in the profile, relative periods
