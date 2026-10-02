@@ -141,6 +141,48 @@ SQLite file at `DB_PATH` (default `data/olist.db`), built by `python -m data.bui
 `order_payments`, `order_reviews`, `geolocation`, plus the internal `_schema_docs`
 (descriptions used in prompts). Full schema: `docs/SCHEMA.md`.
 
+## Uploaded data (owner1)
+`data.upload.build_user_db(sources, out_dir, *, dayfirst=None) -> UploadedDatabase` builds a new
+SQLite file from uploaded CSV files (one table per file) or from one SQLite file. `sources` are file paths or file-like
+objects with a `.name` (e.g. uploaded files); the database gets a new random name in `out_dir`.
+Cleaning up old files is the caller's job.
+
+```python
+UploadedDatabase(db_path: Path,                       # open read-only (SQLAgent and run_query do)
+                 profile: DatasetProfile,             # pass to SQLAgent(profile=...)
+                 tables: dict[str, tuple[int, int]],  # table -> (rows, columns)
+                 notes: list[str])                    # what was changed or assumed, for the user
+
+up = build_user_db(files, out_dir)
+agent = SQLAgent(db_path=up.db_path, profile=up.profile)
+```
+
+- Names: table and column names are cleaned to snake_case (accents removed, other characters
+  become `_`, no leading `_`, a leading digit gets `t_`/`c_`, SQL keywords get a `_` suffix,
+  duplicates get `_2`, `_3`). Every rename is listed in `notes`.
+- Reading: UTF-8 (with or without byte-order mark), else Windows-1252 or Latin-1 with a note;
+  `,`, `;`, tab or `|` as separator.
+- Types are strict: a column is `INTEGER`/`REAL` only if every non-empty value is a number
+  (decimal commas are read in `;` files), and a date only if every value is a date. Dates are
+  stored as ISO text like the demo database. Numbers with leading zeros (e.g. zip codes) stay
+  text. Empty cells and `NA`/`N/A`/`null`/`none`/`nan` become NULL.
+- Ambiguous dates such as `03/04/2023` are read as day/month unless `dayfirst=False`; dates with
+  a day above 12 are always read the way the data shows. A note says which order was used.
+- SQLite uploads (`.sqlite`, `.sqlite3`, `.db`, one file on its own) are copied and checked
+  before use: the file must start with the SQLite header and pass `PRAGMA quick_check`, and
+  files with views, triggers or virtual tables are rejected. Table and column names are then
+  cleaned in the copy with the same rules as CSV headers (foreign keys follow the renames), and
+  the copy is stored as a single file (no WAL). The uploaded file itself is never changed.
+- The profile describes the tables and, for CSV uploads, lists each date column's range as a rule. It sets no
+  `date_range` (completeness of user data is unknown) and `include_samples=False`.
+- Limits (constants in `data/upload.py`): `MAX_UPLOAD_BYTES` = 50 MB for all files together
+  (checked before any file is read), `MAX_FILES` = 10, `MAX_ROWS` = 1,000,000 and
+  `MAX_COLUMNS` = 200 per CSV file or SQLite table, `MAX_TABLES` = 100 per SQLite file.
+- Problems raise `UploadError` (a `ValueError`) with a message meant for the user, e.g.
+  `The upload is 63.2 MB; the limit is 50 MB.`, `report.xlsx is not a CSV or SQLite file.` or
+  `shop.db contains views or triggers (v), which are not supported.` A failed build leaves no
+  file behind.
+
 ## dashboard/ (owner3)
 
 | Module | Purpose |
@@ -162,6 +204,7 @@ SQLite file at `DB_PATH` (default `data/olist.db`), built by `python -m data.bui
 | Module | Entry point | Used by |
 |---|---|---|
 | agent (owner1) | `agent.SQLAgent(llm=None, settings=None, *, db_path=None, max_rows=1000, profile=None).ask(question, history=None) -> QueryResult` | dashboard, evaluation |
+| data/upload (owner1) | `data.upload.build_user_db(sources, out_dir, *, dayfirst=None) -> UploadedDatabase`; errors `UploadError` | dashboard |
 | reports (owner2) | `reports.export.generate_report(week_end=None, *, out_dir=None, db_path=None, llm=None, pdf=False) -> ReportResult(html_path, json_path, summary, pdf_path)`; `reports.weekly_report.build_report(week_end, *, db_path=None, llm=None, config=None) -> WeeklyReport`; `reports.export.export_html / export_pdf / run_weekly`; CLI `python -m reports.export --week-end YYYY-MM-DD [--pdf]` | dashboard, scheduler |
 | modeling (owner2) | `modeling.forecast.forecast_weekly_revenue(history, horizon_weeks=4) -> DataFrame[week, forecast, lower, upper]` (attrs: model, beats_baseline, scores); retrain with `python -m modeling.train` | reports |
 | evaluation (owner3) | `evaluation.run_eval.run_evaluation(ask, cases) -> EvalReport`; `load_questions()`; results files in `evaluation/results/` | dashboard |
