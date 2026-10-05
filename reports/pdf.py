@@ -30,6 +30,8 @@ def write_pdf(report: WeeklyReport, path: Path, notes: dict[str, str]) -> Path:
     (keys: "summary", "anomalies", "changes", "forecast") shared with the HTML report."""
     path.parent.mkdir(parents=True, exist_ok=True)
     title = f"Weekly report: {report.week_start} to {report.week_end}"
+    if report.dataset:
+        title += f" ({report.dataset})"
     with PdfPages(path, metadata={"Title": title}) as pdf:
         for page in (_summary_page, _charts_page, _details_page):
             fig = Figure(figsize=A4)
@@ -119,9 +121,9 @@ def _details_page(fig: Figure, report: WeeklyReport, notes: dict[str, str], titl
     rows = [
         [
             str(r.week),
-            format_number(r.forecast, "BRL"),
-            format_number(r.lower, "BRL"),
-            format_number(r.upper, "BRL"),
+            format_number(r.forecast, report.currency),
+            format_number(r.lower, report.currency),
+            format_number(r.upper, report.currency),
         ]
         for r in forecast.itertuples()
     ]

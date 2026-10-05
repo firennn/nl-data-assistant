@@ -65,7 +65,9 @@ Numbers below come from queries on the full database (revenue as defined above, 
 Measured on 27 held-out questions with verified answers ([EVALUATION.md](EVALUATION.md)):
 
 - **96% accuracy** with gemini-3.1-flash-lite and the Olist profile, the same in three repeated
-  runs; 93% without the business rules and 85% with openai/gpt-oss-120b.
+  runs; 93% without the business rules and 85% with openai/gpt-oss-120b. After the revenue
+  rule was reworded to apply only to revenue questions, one run scored 100% (27/27; see
+  docs/EVALUATION.md).
 - **Every request to change data was refused**, and the read-only layers would block a write
   even if a model produced one.
 - **Business rules matter in both directions.** Without them the agent included canceled

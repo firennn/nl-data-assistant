@@ -30,7 +30,7 @@ def test_discover_finds_every_page_once():
 
 
 def test_olist_only_pages():
-    assert {v.key for v in discover() if v.olist_only} == {"reports", "evaluation"}
+    assert {v.key for v in discover() if v.olist_only} == {"evaluation"}
 
 
 def test_get_view_unknown_key():

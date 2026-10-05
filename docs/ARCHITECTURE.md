@@ -187,23 +187,29 @@ agent = SQLAgent(db_path=up.db_path, profile=up.profile)
 
 | Module | Purpose |
 |---|---|
-| `app.py` | Entry point (`streamlit run dashboard/app.py`): sidebar with the database picker and the page menu |
-| `context.py` | `AppContext`: the current `DataSource` (name, `db_path`, `DatasetProfile`, kind `demo` or `upload`), the Olist demo source, and file locations. The only place that decides which database the chat page queries |
-| `views/` | One file per page, each defining `VIEW = View(key, title, render, order, icon, olist_only)`; found automatically |
+| `app.py` | Entry point (`streamlit run dashboard/app.py`): sidebar with the database picker and the page menu; prepares the demo database on start-up |
+| `context.py` | `AppContext`: the current `DataSource` (name, `db_path`, `DatasetProfile`, kind `demo` or `upload`), the Olist demo source, and file locations. The only place that decides which database the pages query |
+| `views/` | One file per page, each defining `VIEW = View(key, title, render, order, icon, olist_only, needs_database)`; found automatically |
+| `demo_db.py` | `ensure_demo_db(db_path)`: builds the demo database once per process if it is missing (download + `data.build_db`); `DEMO_DB_AUTO_BUILD=0` turns this off; a failure is remembered and shown, not retried |
 | `usage.py` | Local usage log (`dashboard/usage_log.jsonl`, not committed) |
 
 - Pages call only public entry points: `SQLAgent(db_path=..., profile=...).ask`,
-  `data.upload.build_user_db`, `reports.export.generate_report`, and the evaluation results files read with
+  `data.upload.build_user_db`, `reports.export.generate_report` (with a
+  `reports.sales.SalesMapping` for uploaded data), and the evaluation results files read with
   `evaluation.run_eval.load_results` and summarized by `evaluation.metrics`.
-- `olist_only` pages (Reports, Evaluation) always use the Olist demo source. An uploaded
-  database becomes another `DataSource` via `dashboard.context.add_source`; the chat page then
-  queries it with its own profile.
+- Chat and Reports use the current data source; `olist_only` pages (Evaluation) always use the
+  Olist demo source. An uploaded database becomes another `DataSource` via
+  `dashboard.context.add_source`; the chat page then queries it with its own profile, and the
+  Reports page asks for the column mapping (pre-filled by `reports.sales.suggest_mapping`).
+- If the database a page needs is missing (`needs_database=True`, the default), the app shows a
+  message instead of the page. Upload data and Usage work without any database.
 - Upload page (`views/upload.py`): files go to `data.upload.build_user_db`, and the result is
   added as the data source `upload` (one per session; a new upload replaces it and clears its
   conversation). Databases are stored in one folder per session under `UPLOADS_DIR` (system temp
   folder, override `uploads_dir` in tests). A new upload or "Remove" deletes the previous file,
   and session folders not changed for 24 hours are deleted before each new upload. A privacy
-  notice above the uploader says what is sent to the LLM provider API.
+  notice above the uploader says what is sent to the LLM provider API. Reports on the upload
+  are written to the session folder (`reports/` inside it) and deleted with the upload.
 - `dashboard.context.remove_source(state, key, settings)` removes a source and its agent; the
   demo becomes current if the removed source was selected. The demo cannot be removed.
 
@@ -213,7 +219,7 @@ agent = SQLAgent(db_path=up.db_path, profile=up.profile)
 |---|---|---|
 | agent (owner1) | `agent.SQLAgent(llm=None, settings=None, *, db_path=None, max_rows=1000, profile=None).ask(question, history=None) -> QueryResult` | dashboard, evaluation |
 | data/upload (owner1) | `data.upload.build_user_db(sources, out_dir, *, dayfirst=None) -> UploadedDatabase`; errors `UploadError` | dashboard |
-| reports (owner2) | `reports.export.generate_report(week_end=None, *, out_dir=None, db_path=None, llm=None, pdf=False) -> ReportResult(html_path, json_path, summary, pdf_path)`; `reports.weekly_report.build_report(week_end, *, db_path=None, llm=None, config=None) -> WeeklyReport`; `reports.export.export_html / export_pdf / run_weekly`; CLI `python -m reports.export --week-end YYYY-MM-DD [--pdf]` | dashboard, scheduler |
+| reports (owner2) | `reports.export.generate_report(week_end=None, *, out_dir=None, db_path=None, llm=None, pdf=False, mapping=None, dataset="") -> ReportResult(html_path, json_path, summary, pdf_path)`; `reports.weekly_report.build_report(week_end, *, db_path=None, llm=None, config=None, mapping=None, dataset="") -> WeeklyReport`; for any sales table: `reports.sales.SalesMapping(table, date_column, amount_column, order_column=None, customer_column=None, category_column=None, currency="")`, `describe_tables(db_path)`, `suggest_mapping(tables)`, `check_mapping(mapping, db_path) -> (first_date, last_date)` (raises `MappingError`); `reports.export.export_html / export_pdf / run_weekly`; CLI `python -m reports.export --week-end YYYY-MM-DD [--pdf]` | dashboard, scheduler |
 | modeling (owner2) | `modeling.forecast.forecast_weekly_revenue(history, horizon_weeks=4) -> DataFrame[week, forecast, lower, upper]` (attrs: model, beats_baseline, scores); retrain with `python -m modeling.train` | reports |
 | evaluation (owner3) | `evaluation.run_eval.run_evaluation(ask, cases) -> EvalReport`; `load_questions()`; results files in `evaluation/results/` | dashboard |
 | dashboard (owner3) | `streamlit run dashboard/app.py` | users |

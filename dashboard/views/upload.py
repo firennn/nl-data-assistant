@@ -46,10 +46,11 @@ MONTH_FIRST = "Month/day (03/04 = 4 March)"
 PRIVACY_NOTICE = (
     "**Before you upload:** to answer a question, the table and column names, the date ranges "
     "of date columns, your questions (with the earlier ones in the conversation) and the first "
-    "rows of each result are sent to the LLM provider API. Other values from your files are not "
-    "sent. Do not upload personal or confidential "
-    "data. The files are stored on this server only while you use them: a new upload or "
-    "*Remove* deletes them, and anything left over is deleted after 24 hours."
+    "rows of each result are sent to the LLM provider API; for a weekly report, its computed "
+    "totals and the top category name. Other values from your files are not sent. Do not "
+    "upload personal or confidential data. The files are stored on this server only while you "
+    "use them: a new upload or *Remove* deletes them, and anything left over is deleted after "
+    "24 hours."
 )
 LIMITS = (
     f"Up to {MAX_FILES} CSV files (one table per file) or one SQLite file, "
@@ -92,11 +93,24 @@ def current_upload(ctx: AppContext) -> DataSource | None:
     return available_sources(ctx.state, ctx.settings).get(UPLOAD_KEY)
 
 
+def upload_reports_dir(ctx: AppContext) -> Path:
+    """Where reports on the uploaded data are written; deleted with the upload."""
+    return session_folder(ctx) / "reports"
+
+
+def upload_label(ctx: AppContext) -> str:
+    """The uploaded file names, for titles."""
+    source = current_upload(ctx)
+    files = ctx.state.get(INFO_KEY, {}).get("files")
+    return ", ".join(files) if files else (source.name if source else "")
+
+
 def discard_upload(ctx: AppContext) -> None:
-    """Forget the uploaded database, its conversation and its file."""
+    """Forget the uploaded database, its conversation, its reports and its file."""
     source = remove_source(ctx.state, UPLOAD_KEY, ctx.settings)
     ctx.state.get(CHAT_KEY, {}).pop(UPLOAD_KEY, None)
     ctx.state.pop(INFO_KEY, None)
+    shutil.rmtree(upload_reports_dir(ctx), ignore_errors=True)
     if source is not None:
         try:
             source.db_path.unlink(missing_ok=True)
@@ -139,7 +153,7 @@ def show_current(ctx: AppContext) -> None:
     info = ctx.state.get(INFO_KEY, {})
     st.success(
         f"Loaded {', '.join(info.get('files', [])) or source.name}. "
-        "Ask questions about it on the Chat page."
+        "Ask questions about it on the Chat page, or build a weekly report on the Reports page."
     )
     st.dataframe(tables_frame(info.get("tables", {})), hide_index=True, **FULL_WIDTH)
     notes = info.get("notes", [])
@@ -186,4 +200,6 @@ def render(ctx: AppContext) -> None:
     st.rerun()
 
 
-VIEW = View(key="upload", title="Upload data", icon="📤", order=15, render=render)
+VIEW = View(
+    key="upload", title="Upload data", icon="📤", order=15, render=render, needs_database=False
+)

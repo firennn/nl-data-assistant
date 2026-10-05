@@ -58,4 +58,4 @@ def render(ctx: AppContext) -> None:
     )
 
 
-VIEW = View(key="usage", title="Usage", icon="📈", order=40, render=render)
+VIEW = View(key="usage", title="Usage", icon="📈", order=40, render=render, needs_database=False)

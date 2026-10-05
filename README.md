@@ -1,10 +1,12 @@
 # NL Data Assistant
 
-Ask business questions about an e-commerce dataset in plain language and get an answer with the
-SQL used, a result table, a chart and a short explanation. A weekly report job summarizes key
-metrics, trends, anomalies and a forecast, and an evaluation set measures how accurate the SQL is.
+Ask business questions about your own data in plain language and get an answer with the SQL
+used, a result table, a chart and a short explanation. Upload a CSV export (for example sales
+from a shop or POS system) or a SQLite file, ask questions about it, and build a weekly report
+with key metrics, trends, anomalies and a revenue forecast. An evaluation set measures how
+accurate the SQL is.
 
-Dataset: [Olist Brazilian E-Commerce](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
+Demo dataset: [Olist Brazilian E-Commerce](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
 (about 100k orders, 2016-2018, CC BY-NC-SA 4.0). The raw data is not included in this repository;
 a script downloads it and builds a local SQLite database.
 
@@ -34,6 +36,9 @@ flowchart LR
     agent -->|"schema + dataset profile + question"| llm[("LLM provider API")]
     agent -->|"read-only SQL"| shared["shared/<br/>run_query, schema, charts"]
     shared --> db[("SQLite database<br/>Olist demo")]
+    shared --> updb[("SQLite database<br/>uploaded data")]
+    dashboard -->|"CSV / SQLite upload"| upload["data/upload.py"]
+    upload -->|builds| updb
     reports["reports/ + modeling/<br/>weekly report, forecast"] --> shared
     reports -->|"summary from computed facts"| llm
     dashboard -->|"generate_report"| reports
@@ -59,6 +64,10 @@ python -m data.build_db         # download the dataset and build data/olist.db
 python -m agent.cli "Which 5 categories had the highest revenue in 2017?"
 streamlit run dashboard/app.py
 ```
+
+If `data/olist.db` is missing when the dashboard starts, it builds the demo database itself
+(about a minute). To put the app online (Streamlit Community Cloud or Docker), see
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Asking questions
 
@@ -91,7 +100,7 @@ streamlit run dashboard/app.py
 |---|---|
 | Chat | Ask a question about the current database: explanation, the SQL that was run, the result table and a chart. Clarifying questions and follow-ups use the conversation history. |
 | Upload data | Upload a CSV export (one table per file) or a SQLite file. The app builds a read-only database from it, shows what was changed or assumed (renamed columns, date order, decimal commas), and the Chat page then answers questions about it. A notice says what is sent to the LLM provider API; files are deleted when replaced or removed, or after 24 hours. |
-| Reports | Generate the weekly report for a chosen week (HTML, optional PDF), preview it and download it. Uses the Olist demo database. |
+| Reports | Generate the weekly report for a chosen week (HTML, optional PDF), preview it and download it. For uploaded data, choose which columns hold the date and the amount (and optionally order id, customer and category); they are pre-filled from the column names. |
 | Evaluation | Accuracy by category and difficulty, failure types, a per-question table with the reference and generated SQL, and a side-by-side comparison of evaluation runs. |
 | Usage | Simple statistics of the questions asked in the chat (kept in a local log that is not committed). |
 
@@ -129,6 +138,7 @@ Results (2 October 2026, 27 questions, Olist database):
 | gemini-3.1-flash-lite, Olist profile (3 runs) | **96%** in each run (26/27) | the same question failed in all three runs |
 | gemini-3.1-flash-lite, without business rules | 93% (25/27) | |
 | openai/gpt-oss-120b (Groq), Olist profile | 85% (23/27) | one failure has the right numbers with different row labels |
+| gemini-3.1-flash-lite, Olist profile with the reworded revenue rule (5 October, 1 run) | **100%** (27/27) | the earlier failure (q013) is fixed; see docs/EVALUATION.md |
 
 Every request to change data was refused in every run.
 
@@ -173,6 +183,7 @@ opens the database read-only and uses an SQLite authorizer that denies anything 
 | [docs/CASE_STUDY.md](docs/CASE_STUDY.md) | Business question, method, findings and recommendations |
 | [docs/EVALUATION.md](docs/EVALUATION.md) | How the agent is evaluated and the results |
 | [docs/REPORTS_AND_MODELING.md](docs/REPORTS_AND_MODELING.md) | Weekly report and revenue forecast |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Putting the dashboard online: settings, Streamlit Community Cloud, Docker |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Modules, interfaces and data flow |
 | [docs/SCHEMA.md](docs/SCHEMA.md) | Database schema, cleaning steps and data limitations |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Design decisions and the reasons for them |

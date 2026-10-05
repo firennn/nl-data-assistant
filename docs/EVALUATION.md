@@ -99,6 +99,21 @@ Five runs on 2 October 2026, 27 questions each, no question left unscored.
    ambiguous and unsafe questions; the failures are in joins (fan-out, extra filters) and in
    how "delivered" is defined.
 
+### Follow-up: revenue rule reworded (5 October 2026)
+
+Following finding 1, the Olist profile now applies the revenue rule only to revenue questions
+and says to filter on a status only when the question names one (`shared/profiles.py`). The
+question set was not changed.
+
+| Rule wording | Runs | Accuracy | Notes |
+|---|---|---|---|
+| Revenue rule only for revenue questions, plus "do not filter on status unless asked" | 1 | 96% (26/27) | q013 now correct; q016 wrong: "orders delivered to customers" was no longer filtered on `status = 'delivered'` (one order more), so the second sentence went too far |
+| Revenue rule only for revenue questions, plus "filter on a status only when the question names one, e.g. delivered" (current) | 1 | **100%** (27/27) | q009, q012, q013, q015 and q016 all correct |
+
+This is one run of the current wording; the earlier runs showed that this model repeats the
+same answers closely, but more runs (and the other models) are needed before calling the
+improvement stable.
+
 ## Limitations
 
 - **Small question set.** With 27 questions one question is about 3.7 percentage points, so

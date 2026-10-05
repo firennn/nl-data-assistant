@@ -30,8 +30,12 @@ OLIST_PROFILE = DatasetProfile(
     name="Olist e-commerce",
     description="an e-commerce marketplace (Olist, Brazil)",
     rules=[
-        "Revenue = SUM(order_items.price) for orders whose status is not 'canceled' or "
-        "'unavailable' (freight excluded), unless the question asks for something else.",
+        "Only when the question asks for revenue (sales value, average order value): Revenue = "
+        "SUM(order_items.price) for orders whose status is not 'canceled' or 'unavailable' "
+        "(freight excluded), unless the question asks for something else.",
+        "Do not add that canceled/unavailable filter to questions that are not about revenue "
+        "(e.g. counts of orders, sellers or payments). If the question names a status, such as "
+        "delivered or shipped orders, filter on that status (status = 'delivered').",
         "Count people with COUNT(DISTINCT customers.customer_unique_id), not customer_id.",
         "After joining order_items (one row per item), count orders with "
         "COUNT(DISTINCT o.order_id).",

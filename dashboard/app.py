@@ -24,6 +24,7 @@ from dashboard.context import (  # noqa: E402
     get_context,
     set_current_source,
 )
+from dashboard.demo_db import build_error, ensure_demo_db  # noqa: E402
 from dashboard.views import View, discover, get_view  # noqa: E402
 
 PAGE_KEY = "page"
@@ -35,7 +36,23 @@ def render_view(view: View, ctx: AppContext) -> None:
             f"This page always uses the Olist demo database; the selected database "
             f"({ctx.source.name}) is used on the Chat page."
         )
+    source = ctx.demo if view.olist_only else ctx.source
+    if view.needs_database and not source.db_path.exists():
+        st.warning(missing_database_message(source.is_demo, build_error(source.db_path)))
+        return
     view.render(ctx)
+
+
+def missing_database_message(is_demo: bool, error: str | None = None) -> str:
+    if not is_demo:
+        return "The uploaded data is no longer available. Please upload it again."
+    text = (
+        "The demo database is not available on this server, so this page cannot be shown. "
+        "You can still upload your own data on the Upload data page."
+    )
+    if error:
+        text += f" (Building the demo database failed: {error})"
+    return text
 
 
 def _render(key: str) -> None:
@@ -82,6 +99,9 @@ def sidebar(ctx: AppContext, views: list[View]) -> View:
 def main() -> None:
     st.set_page_config(page_title="NL Data Assistant", layout="wide")
     ctx = get_context()
+    if not ctx.demo.db_path.exists():
+        with st.spinner("Preparing the demo database (first start only, about a minute)..."):
+            ensure_demo_db(ctx.demo.db_path)
     views = discover()
     render_view(sidebar(ctx, views), ctx)
 

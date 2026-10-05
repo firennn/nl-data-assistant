@@ -22,6 +22,11 @@ EXAMPLE_QUESTIONS = (
     "What is the average review score per month in 2018?",
     "How many orders were paid by credit card?",
 )
+UPLOAD_EXAMPLE_QUESTIONS = (
+    "What are the total sales per month?",
+    "Which 10 products had the highest revenue?",
+    "How many customers bought more than once?",
+)
 
 
 def history_for_agent(messages: list[dict]) -> list[tuple[str, str]]:
@@ -84,6 +89,8 @@ def render(ctx: AppContext) -> None:
     if not messages and source.is_demo:
         st.caption("Examples: " + " · ".join(EXAMPLE_QUESTIONS))
         st.caption("To ask about your own data, upload a CSV or SQLite file on the Upload page.")
+    elif not messages:
+        st.caption("Examples: " + " · ".join(UPLOAD_EXAMPLE_QUESTIONS))
     if messages and st.button("Clear conversation"):
         messages.clear()
 

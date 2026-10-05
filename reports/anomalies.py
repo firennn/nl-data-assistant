@@ -142,15 +142,20 @@ def daily_orders(start: date, end: date, db_path: DbPath = None) -> pd.Series:
 
 
 def find_daily_anomalies(
-    week_end: date, *, config: AnomalyConfig | None = None, db_path: DbPath = None
+    week_end: date,
+    *,
+    config: AnomalyConfig | None = None,
+    db_path: DbPath = None,
+    series: dict[str, SeriesFn] | None = None,
 ) -> pd.DataFrame:
     """Run every detector on every daily series and return the flagged days in the 7 days
-    ending on `week_end`, with ANOMALY_COLUMNS, sorted by date and metric."""
+    ending on `week_end`, with ANOMALY_COLUMNS, sorted by date and metric. `series` defaults
+    to the Olist series in DAILY_SERIES."""
     config = config or AnomalyConfig()
     week_start = week_end - timedelta(days=6)
     history_start = week_start - timedelta(days=config.daily_window)
     frames = []
-    for metric, load in DAILY_SERIES.items():
+    for metric, load in (series if series is not None else DAILY_SERIES).items():
         series = load(history_start, week_end, db_path)
         for method, detect in DETECTORS.items():
             found = detect(series, config)

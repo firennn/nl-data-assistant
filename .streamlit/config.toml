@@ -1,0 +1,14 @@
+# Streamlit settings for the dashboard (local runs and deployments).
+# Secrets do not belong here: set LLM_API_KEY etc. as environment variables or in the host's
+# secrets settings (see docs/DEPLOYMENT.md). .streamlit/secrets.toml is gitignored.
+
+[server]
+# Matches data.upload.MAX_UPLOAD_BYTES (50 MB for all files together, checked again on upload).
+maxUploadSize = 50
+
+[browser]
+gatherUsageStats = false
+
+[client]
+# Visitors of a deployed app do not need the developer menu.
+toolbarMode = "viewer"

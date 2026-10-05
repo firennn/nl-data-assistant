@@ -35,6 +35,7 @@ class View:
     order: int = 100  # position in the menu
     icon: str = ""
     olist_only: bool = False  # always uses the Olist demo database, whatever is selected
+    needs_database: bool = True  # False for pages that work without any database file
 
 
 def discover() -> list[View]:

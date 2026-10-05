@@ -1,0 +1,28 @@
+# Secrets and local settings
+.env
+.streamlit/secrets.toml
+
+# Local environments, caches and version control
+.git
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.vscode
+.idea
+
+# Local data and generated files (the image builds its own demo database)
+data/raw
+*.db
+*.sqlite
+*.sqlite3
+reports/output
+evaluation/results
+modeling/artifacts
+dashboard/usage_log.jsonl
+
+# Not needed to run the app
+tests
+docs/images

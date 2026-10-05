@@ -172,6 +172,46 @@ def test_upload_page_shows_the_loaded_data_and_chat_uses_it(tmp_path, sales_csv)
     assert asked == [up.db_path]
 
 
+def test_reports_page_on_uploaded_data(tmp_path, monkeypatch):
+    """Upload -> Reports: the mapping is pre-filled from the column names and a report is
+    built from the uploaded table; removing the upload deletes its reports."""
+    from reports import summary
+    from shared.llm import FakeProvider, LLMError
+
+    monkeypatch.setattr(summary, "get_llm", lambda: FakeProvider([LLMError("no key")]))
+    lines = ["Order Date,Invoice,Customer,Category,Total"]
+    for day in range(1, 29):
+        for k in range(1 + day % 3):
+            lines.append(f"2024-02-{day:02d},I{day}-{k},C{(day + k) % 5},Cat{k},{10 + day + k}")
+    csv = write_csv(tmp_path, "shop.csv", "\n".join(lines) + "\n")
+    state = new_state(tmp_path)
+    load_upload(get_context(state), [csv])
+
+    at = go_to(make_app(tmp_path, state).run(), "Reports")
+    assert not at.exception
+    chosen = {s.label: s.value for s in at.selectbox}
+    assert chosen["Date"] == "order_date" and chosen["Amount (revenue per row)"] == "total"
+    assert chosen["Order id"] == "invoice" and chosen["Category"] == "category"
+    assert any("2024-02-01 to 2024-02-28" in c.value for c in at.caption)
+    at = next(b for b in at.button if b.label == "Generate report").click().run()
+    assert not at.exception
+    assert "2024-02-28" in at.success[0].value
+    folder = session_folder(get_context(state)) / "reports"
+    assert (folder / "weekly_report_2024-02-28.html").exists()
+
+    discard_upload(get_context(state))
+    assert not folder.exists()
+
+
+def test_reports_page_without_a_date_column(tmp_path):
+    csv = write_csv(tmp_path, "people.csv", "name,age\nAna,31\n")
+    state = new_state(tmp_path)
+    load_upload(get_context(state), [csv])
+    at = go_to(make_app(tmp_path, state).run(), "Reports")
+    assert not at.exception
+    assert "needs a table with a date column" in at.warning[0].value
+
+
 def test_remove_button_returns_to_the_demo(tmp_path, sales_csv):
     state = new_state(tmp_path)
     up = load_upload(get_context(state), [sales_csv])

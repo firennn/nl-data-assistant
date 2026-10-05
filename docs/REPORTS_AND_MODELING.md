@@ -134,6 +134,48 @@ A4 PDF: summary and key metrics, the three charts, and the changes, anomalies an
 is drawn with matplotlib from the same chart data as the HTML report, so both show the same
 numbers, and it needs no browser.
 
+## Reports on uploaded data
+
+The same report works on any sales table, for example an uploaded CSV export. The user says
+which columns hold what in a `SalesMapping` (`reports/sales.py`); the dashboard pre-fills it
+from the column names (`order_date`, `net_sales`, `invoice_no`, `customer`, `category`, ...).
+
+```python
+from reports.export import generate_report
+from reports.sales import SalesMapping
+
+mapping = SalesMapping(
+    table="pos_export",
+    date_column="order_date",
+    amount_column="net_sales",
+    order_column="invoice_no",
+    customer_column="customer",
+    category_column="category",
+    currency="USD",
+)
+result = generate_report(db_path="upload.db", mapping=mapping, dataset="POS Export.csv")
+```
+
+| Part | Olist demo | Mapped data |
+|---|---|---|
+| Revenue | `order_items.price`, canceled and unavailable orders excluded | sum of the amount column; every row counts |
+| Orders | non-canceled orders | distinct order ids, or rows ("Transactions") without an order column |
+| Average order value | revenue / orders | revenue / orders (or transactions) |
+| Customers | new customers | customers in the week and new customers (first date in the table), only with a customer column |
+| Reviews, on-time delivery | yes | no (Olist-specific) |
+| Charts | revenue trend, top categories, top states | revenue trend, top categories (with a category column) |
+| Anomalies, changes, forecast, summary, HTML/PDF/JSON | same code | same code |
+| Default week | the 7 days ending 2018-08-19 | the 7 days ending on the last date in the data |
+
+Only the date and amount are required. Rows whose date cannot be read are left out, and the
+mapping is checked first (the date column must hold dates, the amount column only numbers).
+Refunds or cancellations should be removed from the file or be negative amounts, since every row
+counts. Money is shown with the currency label the user enters (none by default).
+
+Tests: `tests/reports/test_sales.py` builds a four-month CSV export through the real upload
+builder and checks every metric against a pandas calculation, the spike detection, the
+forecast history and the HTML/PDF output.
+
 ## Not included yet
 
 - A scheduled GitHub Actions workflow: an example is in `reports/README.md`.

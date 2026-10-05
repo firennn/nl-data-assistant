@@ -22,7 +22,7 @@ from shared.models import MetricResult
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a data analyst writing the executive summary of a weekly e-commerce \
+SYSTEM_PROMPT = """You are a data analyst writing the executive summary of a weekly sales \
 report for managers.
 Rules:
 - Use only the facts provided. Do not compute new numbers and do not invent figures.
@@ -44,16 +44,20 @@ class Summary:
     facts: str  # the facts the summary is based on
 
 
+# Units that are counts or ratios; any other unit is a currency ("" = money without a label).
+COUNT_UNITS = frozenset({"orders", "transactions", "customers"})
+
+
 def format_number(value: float, unit: str | None = None) -> str:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return "n/a"
-    if unit == "BRL":
-        return f"{value:,.2f} BRL"
     if unit == "%":
         return f"{value:.1f}%"
     if unit == "score":
         return f"{value:.2f}"
-    return f"{value:,.0f}"
+    if unit is None or unit in COUNT_UNITS:
+        return f"{value:,.0f}"
+    return f"{value:,.2f} {unit}".rstrip()
 
 
 def build_facts(
@@ -64,8 +68,10 @@ def build_facts(
     top_category: tuple[str, float] | None = None,
     top_state: tuple[str, int] | None = None,
     forecast: pd.DataFrame | None = None,
+    currency: str = "BRL",
 ) -> str:
-    """Turn the computed results into short plain-text facts for the summary prompt."""
+    """Turn the computed results into short plain-text facts for the summary prompt.
+    `currency` labels the top category's revenue and the forecast ("" for no label)."""
     lines = []
     if metrics:
         first = metrics[0]
@@ -96,27 +102,28 @@ def build_facts(
         lines.append("No daily anomalies in revenue or orders this week.")
     if top_category:
         name, revenue = top_category
-        lines.append(f"Top category by revenue: {name} ({format_number(revenue, 'BRL')}).")
+        lines.append(f"Top category by revenue: {name} ({format_number(revenue, currency)}).")
     if top_state:
         state, orders = top_state
         lines.append(f"State with the most orders: {state} ({orders:,} orders).")
     if forecast is not None and not forecast.empty:
-        lines.extend(_forecast_facts(forecast))
+        lines.extend(_forecast_facts(forecast, currency))
     return "\n".join(f"- {line}" for line in lines)
 
 
-def _forecast_facts(forecast: pd.DataFrame) -> list[str]:
+def _forecast_facts(forecast: pd.DataFrame, currency: str = "BRL") -> list[str]:
     first = forecast.iloc[0]
     lines = [
         f"Revenue forecast for the week starting {first['week']}: "
-        f"{format_number(first['forecast'], 'BRL')} (80% range "
-        f"{format_number(first['lower'], 'BRL')} to {format_number(first['upper'], 'BRL')})."
+        f"{format_number(first['forecast'], currency)} (80% range "
+        f"{format_number(first['lower'], currency)} to "
+        f"{format_number(first['upper'], currency)})."
     ]
     model = forecast.attrs.get("model")
     scores = forecast.attrs.get("scores") or {}
     if model and "naive" in scores and model in scores:
-        mae_model = format_number(scores[model]["mae"], "BRL")
-        mae_naive = format_number(scores["naive"]["mae"], "BRL")
+        mae_model = format_number(scores[model]["mae"], currency)
+        mae_naive = format_number(scores["naive"]["mae"], currency)
         if forecast.attrs.get("beats_baseline"):
             lines.append(
                 f"The forecast model beats the naive baseline in backtesting "

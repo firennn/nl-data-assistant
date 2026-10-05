@@ -20,6 +20,7 @@ from pathlib import Path
 import pandas as pd
 
 from reports.anomalies import AnomalyConfig
+from reports.sales import SalesMapping, check_mapping
 from reports.summary import format_number
 from reports.weekly_report import WeeklyReport, build_report
 from shared.charts import render_chart
@@ -63,6 +64,7 @@ def export_html(report: WeeklyReport, path: Path | None = None) -> Path:
     body = "\n".join(
         [
             f"<h1>Weekly report: {report.week_start} to {report.week_end}</h1>",
+            f'<p class="muted">{escape(report.dataset)}</p>' if report.dataset else "",
             _summary_html(report),
             _kpi_html(report),
             _charts_html(report),
@@ -99,6 +101,8 @@ def report_to_dict(report: WeeklyReport) -> dict:
         "week_end": report.week_end.isoformat(),
         "summary": report.summary,
         "summary_source": report.summary_source,
+        "dataset": report.dataset,
+        "currency": report.currency,
         "metrics": [
             {
                 "name": m.name,
@@ -129,12 +133,23 @@ def generate_report(
     llm: LLMProvider | None = None,
     config: AnomalyConfig | None = None,
     pdf: bool = False,
+    mapping: SalesMapping | None = None,
+    dataset: str = "",
 ) -> ReportResult:
-    """Build the report for the week ending on `week_end` (default: the last full week in the
-    data), write the HTML file and a JSON summary next to it (and the PDF if `pdf`), and
-    return the paths and the summary."""
-    week = _parse_week_end(week_end)
-    report = build_report(week, db_path=db_path, llm=llm, config=config)
+    """Build the report for the week ending on `week_end`, write the HTML file and a JSON
+    summary next to it (and the PDF if `pdf`), and return the paths and the summary.
+
+    Without `mapping` the report covers the Olist tables and `week_end` defaults to the last
+    full week in that data. With a reports.sales.SalesMapping it covers the mapped table and
+    defaults to the 7 days ending on the last date in it. `dataset` names the data in the
+    report title."""
+    if week_end is None and mapping is not None:
+        week = check_mapping(mapping, db_path)[1]
+    else:
+        week = _parse_week_end(week_end)
+    report = build_report(
+        week, db_path=db_path, llm=llm, config=config, mapping=mapping, dataset=dataset
+    )
     out_dir = Path(out_dir) if out_dir else OUTPUT_DIR
     html_path = export_html(report, out_dir / f"weekly_report_{report.week_end}.html")
     summary = report_to_dict(report)
@@ -222,8 +237,8 @@ def report_notes(report: WeeklyReport) -> dict[str, str]:
         elif forecast.attrs.get("beats_baseline"):
             notes["forecast"] = (
                 f"Model: {model}. In backtesting it beat the naive baseline (last week's value): "
-                f"average error {format_number(scores[model]['mae'], 'BRL')} vs "
-                f"{format_number(scores['naive']['mae'], 'BRL')}."
+                f"average error {format_number(scores[model]['mae'], report.currency)} vs "
+                f"{format_number(scores['naive']['mae'], report.currency)}."
             )
         else:
             notes["forecast"] = (
@@ -307,8 +322,9 @@ def _forecast_html(report: WeeklyReport) -> str:
     if forecast is None or forecast.empty:
         return "<h2>Revenue forecast</h2>\n<p>No forecast is available for this week.</p>"
     rows = "\n".join(
-        f"<tr><td>{r.week}</td><td>{format_number(r.forecast, 'BRL')}</td>"
-        f"<td>{format_number(r.lower, 'BRL')}</td><td>{format_number(r.upper, 'BRL')}</td></tr>"
+        f"<tr><td>{r.week}</td><td>{format_number(r.forecast, report.currency)}</td>"
+        f"<td>{format_number(r.lower, report.currency)}</td>"
+        f"<td>{format_number(r.upper, report.currency)}</td></tr>"
         for r in forecast.itertuples()
     )
     note = escape(report_notes(report)["forecast"])
