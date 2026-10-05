@@ -59,7 +59,13 @@ def test_app_starts_with_all_pages(tmp_path):
     at = make_app(tmp_path).run()
     assert not at.exception
     options = at.sidebar.radio[0].options
-    assert [o.split(" ", 1)[-1] for o in options] == ["Chat", "Reports", "Evaluation", "Usage"]
+    assert [o.split(" ", 1)[-1] for o in options] == [
+        "Chat",
+        "Upload data",
+        "Reports",
+        "Evaluation",
+        "Usage",
+    ]
     assert at.sidebar.selectbox[0].value == "olist"
 
 

@@ -90,13 +90,14 @@ streamlit run dashboard/app.py
 | Page | What it shows |
 |---|---|
 | Chat | Ask a question about the current database: explanation, the SQL that was run, the result table and a chart. Clarifying questions and follow-ups use the conversation history. |
+| Upload data | Upload a CSV export (one table per file) or a SQLite file. The app builds a read-only database from it, shows what was changed or assumed (renamed columns, date order, decimal commas), and the Chat page then answers questions about it. A notice says what is sent to the LLM provider API; files are deleted when replaced or removed, or after 24 hours. |
 | Reports | Generate the weekly report for a chosen week (HTML, optional PDF), preview it and download it. Uses the Olist demo database. |
 | Evaluation | Accuracy by category and difficulty, failure types, a per-question table with the reference and generated SQL, and a side-by-side comparison of evaluation runs. |
 | Usage | Simple statistics of the questions asked in the chat (kept in a local log that is not committed). |
 
 Pages live in `dashboard/views/`, one file per page; a new file there adds a page to the menu.
-The database the chat page queries is chosen in one place (`dashboard/context.py`), so the
-same page will work for uploaded data.
+The database the chat page queries is chosen in one place (`dashboard/context.py`); the
+sidebar switches between the Olist demo and the uploaded data.
 
 ## Weekly report and forecast
 

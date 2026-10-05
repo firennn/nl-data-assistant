@@ -25,7 +25,7 @@ from shared.profiles import OLIST_PROFILE
 def test_discover_finds_every_page_once():
     views = discover()
     keys = [v.key for v in views]
-    assert keys == ["chat", "reports", "evaluation", "usage"]
+    assert keys == ["chat", "upload", "reports", "evaluation", "usage"]
     assert all(isinstance(v, View) and callable(v.render) for v in views)
 
 

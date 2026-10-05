@@ -2,11 +2,12 @@
 
 This is the only place that decides which database the chat page queries. Every page gets an
 AppContext; no page reads DB_PATH or picks a profile itself. The Olist demo database is always
-available; uploaded databases will be added as further sources by the upload page.
+available; the upload page adds an uploaded database as a further source.
 """
 
 from __future__ import annotations
 
+import tempfile
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,8 @@ from shared.profiles import OLIST_PROFILE
 
 DASHBOARD_DIR = Path(__file__).resolve().parent
 USAGE_LOG = DASHBOARD_DIR / "usage_log.jsonl"  # local only, never committed
+# Uploaded databases: one folder per session, outside the repository.
+UPLOADS_DIR = Path(tempfile.gettempdir()) / "nl-data-assistant" / "uploads"
 
 # Keys in st.session_state. Tests can set the *_OVERRIDE keys before the app runs.
 SOURCES_KEY = "data_sources"
@@ -27,6 +30,7 @@ AGENTS_KEY = "agents"
 RESULTS_DIR_OVERRIDE = "results_dir"
 REPORTS_DIR_OVERRIDE = "reports_dir"
 USAGE_LOG_OVERRIDE = "usage_log"
+UPLOADS_DIR_OVERRIDE = "uploads_dir"
 AGENT_FACTORY_OVERRIDE = "agent_factory"
 
 DEMO_KEY = "olist"
@@ -55,6 +59,7 @@ class AppContext:
     results_dir: Path
     reports_dir: Path
     usage_log: Path
+    uploads_dir: Path
     state: MutableMapping = field(repr=False)
 
     def agent(self, source: DataSource | None = None):
@@ -98,6 +103,18 @@ def add_source(state: MutableMapping, source: DataSource, settings: Settings) ->
     state.get(AGENTS_KEY, {}).pop(source.key, None)
 
 
+def remove_source(state: MutableMapping, key: str, settings: Settings) -> DataSource | None:
+    """Forget a data source and its agent; the demo becomes current if it was selected.
+    The demo source cannot be removed. Returns the removed source, if there was one."""
+    if key == DEMO_KEY:
+        raise ValueError("the demo data source cannot be removed")
+    source = available_sources(state, settings).pop(key, None)
+    state.get(AGENTS_KEY, {}).pop(key, None)
+    if state.get(CURRENT_KEY) == key:
+        state[CURRENT_KEY] = DEMO_KEY
+    return source
+
+
 def set_current_source(state: MutableMapping, key: str) -> None:
     state[CURRENT_KEY] = key
 
@@ -118,5 +135,6 @@ def get_context(state: MutableMapping | None = None) -> AppContext:
         results_dir=Path(state.get(RESULTS_DIR_OVERRIDE) or RESULTS_DIR),
         reports_dir=Path(state.get(REPORTS_DIR_OVERRIDE) or REPORTS_DIR),
         usage_log=Path(state.get(USAGE_LOG_OVERRIDE) or USAGE_LOG),
+        uploads_dir=Path(state.get(UPLOADS_DIR_OVERRIDE) or UPLOADS_DIR),
         state=state,
     )

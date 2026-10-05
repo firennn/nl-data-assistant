@@ -1,7 +1,7 @@
 """Chat with the data: ask a question, see the answer, the SQL used, the table and the chart.
 
-Uses the current data source from the context, so the same page works for the Olist demo and,
-later, for uploaded databases. Each data source keeps its own conversation.
+Uses the current data source from the context, so the same page works for the Olist demo and
+for an uploaded database. Each data source keeps its own conversation.
 """
 
 from __future__ import annotations
@@ -83,6 +83,7 @@ def render(ctx: AppContext) -> None:
 
     if not messages and source.is_demo:
         st.caption("Examples: " + " · ".join(EXAMPLE_QUESTIONS))
+        st.caption("To ask about your own data, upload a CSV or SQLite file on the Upload page.")
     if messages and st.button("Clear conversation"):
         messages.clear()
 

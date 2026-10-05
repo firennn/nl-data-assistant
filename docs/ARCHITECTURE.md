@@ -193,11 +193,19 @@ agent = SQLAgent(db_path=up.db_path, profile=up.profile)
 | `usage.py` | Local usage log (`dashboard/usage_log.jsonl`, not committed) |
 
 - Pages call only public entry points: `SQLAgent(db_path=..., profile=...).ask`,
-  `reports.export.generate_report`, and the evaluation results files read with
+  `data.upload.build_user_db`, `reports.export.generate_report`, and the evaluation results files read with
   `evaluation.run_eval.load_results` and summarized by `evaluation.metrics`.
 - `olist_only` pages (Reports, Evaluation) always use the Olist demo source. An uploaded
   database becomes another `DataSource` via `dashboard.context.add_source`; the chat page then
   queries it with its own profile.
+- Upload page (`views/upload.py`): files go to `data.upload.build_user_db`, and the result is
+  added as the data source `upload` (one per session; a new upload replaces it and clears its
+  conversation). Databases are stored in one folder per session under `UPLOADS_DIR` (system temp
+  folder, override `uploads_dir` in tests). A new upload or "Remove" deletes the previous file,
+  and session folders not changed for 24 hours are deleted before each new upload. A privacy
+  notice above the uploader says what is sent to the LLM provider API.
+- `dashboard.context.remove_source(state, key, settings)` removes a source and its agent; the
+  demo becomes current if the removed source was selected. The demo cannot be removed.
 
 ## Public entry points
 
